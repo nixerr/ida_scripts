@@ -584,8 +584,29 @@ print("Found OSMetaClass by emulating => " + str(count_OSMetaClass_emul))
 # print(bad_driver)
 
 # Write to file class parents
+
+for drv in init_calls.keys():
+    for call in init_calls[drv]:
+        # Rename all gMetaClass pointers
+        class_ptr = call[0]
+        class_name = GetString(call[1])
+        class_name_meta = class_name + '::gMetaClass'
+
+        MakeNameEx(class_ptr, class_name_meta, 0)
+
+    idaapi.autoWait()
+
+    for call in init_calls[drv]:
+        class_ptr = call[0]
+        class_name = GetString(call[1])
+        class_parent = NameEx(BADADDR, call[2])
+        class_parent_name = Demangle(class_parent, GetLongPrm(INF_LONG_DN))
+        if class_parent_name:
+            class_parent = class_parent_name
+
+
 fd = open('classes_iphone.txt', 'w')
-# Rename parameters
+
 for drv in init_calls.keys():
     print("")
     print(drv)
@@ -595,7 +616,7 @@ for drv in init_calls.keys():
         class_name_meta = class_name + '::gMetaClass'
 
         i = 0
-        MakeNameEx(class_ptr, class_name_meta, 0)
+        # MakeNameEx(class_ptr, class_name_meta, 0)
         
         class_parent = NameEx(BADADDR, call[2])
         class_parent_name = Demangle(class_parent, GetLongPrm(INF_LONG_DN))
