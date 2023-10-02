@@ -2,12 +2,46 @@ import idautils
 import ida_funcs
 import ida_search
 import ida_idaapi
+import ida_strlist
+import ida_bytes
+
 
 base_ea = idaapi.get_imagebase()
 end_ea = ida_segment.get_last_seg().start_ea
 
 def count_xref_to_func(ea):
     return len(list(idautils.XrefsTo(ea)))
+
+
+def find_string_address(s):
+    sc = ida_strlist.string_info_t()
+    for i in range(0,ida_strlist.get_strlist_qty()):
+        ida_strlist.get_strlist_item(sc,i)
+        c = ida_bytes.get_strlit_contents(sc.ea,sc.length,sc.type)
+        if c and c == s.encode():
+            return sc.ea
+
+    return BADADDR
+
+
+def find_function_with_string(s):
+    s_addr = find_string_address(s)
+    if s_addr != ida_idaapi.BADADDR:
+        for xref in idautils.XrefsTo(s_addr):
+            func = idaapi.get_func(xref.frm)
+            return func.start_ea
+
+    return ida_idaapi.BADADDR
+
+
+def define_function_by_string(n, s):
+    f = find_function_with_string(s)
+    if f != ida_idaapi.BADADDR:
+        idc.set_name(f, n, idc.SN_CHECK)
+        print("[+] {}: 0x{:016x}".format(n, f))
+    else:
+        print("[-] {} not found".format(n))
+
 
 def find_panic():
     panic_trap_to_debugger_addr = get_name_ea_simple("panic_trap_to_debugger")
@@ -16,6 +50,8 @@ def find_panic():
     panic = 0
     for xref in xrefs:
         f = ida_funcs.get_func(xref.frm)
+        if f == None:
+            continue
         n = count_xref_to_func(f.start_ea)
         if n > max_n:
             max_n = n
@@ -26,70 +62,129 @@ def find_panic():
 
 
 def find_stack_chk_fail():
-    stack_protector_addr = ida_search.find_text(base_ea, 1, 1, "stack_protector.c", ida_search.SEARCH_DOWN)
-    if stack_protector_addr != ida_idaapi.BADADDR:
-        for xref in idautils.XrefsTo(stack_protector_addr):
-            func = idaapi.get_func(xref.frm)
-            idc.set_name(func.start_ea, "__stack_chk_fail", idc.SN_CHECK)
-            print("[+] __stack_chk_fail: 0x{0:x}".format(func.start_ea))
-            return
-
-    print("[-] __stack_chk_fail not found")
-    return
+    define_function_by_string("__stack_chk_fail", "stack_protector.c")
 
 
 def find_assert():
-    assert_addr = ida_search.find_text(base_ea, 1, 1, "%s:%d Assertion failed: %s", ida_search.SEARCH_DOWN)
-    if assert_addr != ida_idaapi.BADADDR:
-        for xref in idautils.XrefsTo(assert_addr):
-            func = idaapi.get_func(xref.frm)
-            idc.set_name(func.start_ea, "assert", idc.SN_CHECK)
-            print("[+] assert: 0x{0:x}".format(func.start_ea))
-            return
-            
-    print("[-] assert not found")
-    return
+    define_function_by_string("assert", "%s:%d Assertion failed: %s")
 
 
 def find_mig_init():
-    mig_init_panic = ida_search.find_text(base_ea, 1, 1, "multiple entries with the same msgh_id @%s:%d", ida_search.SEARCH_DOWN)
-    if mig_init_panic != ida_idaapi.BADADDR:
-        for xref in idautils.XrefsTo(mig_init_panic):
-            func = idaapi.get_func(xref.frm)
-            idc.set_name(func.start_ea, "mig_init", idc.SN_CHECK)
-            print("[+] mig_init: 0x{0:x}".format(func.start_ea))
-            return
+    define_function_by_string("mig_init", "multiple entries with the same msgh_id @%s:%d")
 
-    print("[-] mig_init not found")
+
+def find_mig_e():
+    mig_init_addr = get_name_ea_simple("mig_init")
+    # skip PACIBSP
+    mig_init_addr += 4
+    max_step = 8
+    insn = ida_ua.insn_t()
+    while max_step:
+        max_step -= 1
+        if ida_ua.print_insn_mnem(mig_init_addr) == 'ADRL' and ida_ua.decode_insn(insn, mig_init_addr):
+            if len(insn.ops) > 2 and insn.ops[1].type == ida_ua.o_imm:
+                mig_e_addr = insn.ops[1].value
+                set_name(mig_e_addr, "mig_e", idc.SN_CHECK)
+                print("[+] mig_e: 0x{:016x}".format(mig_e_addr))
+                return
+        mig_init_addr += 4
+
+
+def find_PE_parse_boot_argn_internal():
+    maxmem_addr = find_string_address("maxmem")
+    if maxmem_addr != ida_idaapi.BADADDR:
+        for xref in idautils.XrefsTo(maxmem_addr):
+            cur_addr = xref.frm
+            max_step = 5
+            insn = ida_ua.insn_t()
+            while max_step:
+                max_step -= 1
+                cur_addr += 4
+                if ida_ua.decode_insn(insn, cur_addr):
+                    if ida_idp.is_call_insn(insn) and insn.ops[0].type == ida_ua.o_near:
+                        func = insn.ops[0].addr
+                        idc.set_name(func, "PE_parse_boot_argn_internal", idc.SN_CHECK)
+                        print("[+] PE_parse_boot_argn_internal: 0x{0:x}".format(func))
+                        return
+
+    print("[-] PE_parse_boot_argn_internal not found")
     return
+
+
+def find_mac_policy_register():
+    define_function_by_string("mac_policy_register", "policy's name is not set @%s:%d")
 
 
 def find_ExceptionVectorsBase():
     MSR_VBAR = "? C0 18 D5"
+    msr_vbar_addr = ida_search.find_binary(base_ea, end_ea, MSR_VBAR, 16, ida_search.SEARCH_DOWN)
+    insn = ida_ua.insn_t()
+    while msr_vbar_addr != ida_idaapi.BADADDR:
+        reg_num = ida_bytes.get_dword(msr_vbar_addr) & 0xff
+        
+        num_steps = 5
+        cur_addr = msr_vbar_addr - 4
+        candidate = 0
+        while num_steps != 0:
+            if ida_ua.print_insn_mnem(cur_addr) == 'ADRL' and ida_ua.decode_insn(insn, cur_addr):
+                if len(insn.ops) > 2 and insn.ops[1].type == ida_ua.o_imm:
+                    candidate = insn.ops[1].value
+                    break
+            num_steps -= 1
+            cur_addr -= 4
 
-    msr_vbar_addr = ida_search.find_binary(base_ea, end_ea, MSR_VBAR, 16, 0)
+        if ida_bytes.get_dword(candidate) != 0x14000000:
+            set_name(candidate, "ExceptionVectorsBase", idc.SN_CHECK)
+            print("[i] ExceptionVectorsBase: 0x{:016x}".format(candidate))
+            return
+        msr_vbar_addr = ida_search.find_binary(msr_vbar_addr+2, end_ea, MSR_VBAR, 16, ida_search.SEARCH_DOWN)
+        
 
-# mach_eventlink_subsystem      716200  716200
-# catch_mach_exc_subsystem      2405    2410
-# catch_exc_subsystem           2401    2404
-# task_restartable_subsystem    8000    8002
-# memory_entry_subsystem        4900    4903
-# mach_voucher_subsystem        5400    5405
-# vm32_map_subsystem            3800    3832
-# thread_act_subsystem          3600    3631
-# task_subsystem                3400    3465
-# is_iokit_subsystem            2800    2891
-# processor_set_subsystem       4000    4011
-# processor_subsystem           3000    3006
-# clock_subsystem               1000    1003
-# host_priv_subsystem           400     426
-# mach_host_subsystem           200     235
-# mach_port_subsystem           3200    3243
-# mach_vm_subsystem             4800    4826
+
+def find_mig_subsystems():
+    known_subsystems = {
+        '716200': 'mach_eventlink_subsystem',
+        '2405':   'catch_mach_exc_subsystem',
+        '2401':   'catch_exc_subsystem',
+        '8000':   'task_restartable_subsystem',
+        '4900':   'memory_entry_subsystem',
+        '5400':   'mach_voucher_subsystem',
+        '3800':   'vm32_map_subsystem',
+        '3600':   'thread_act_subsystem',
+        '3400':   'task_subsystem',
+        '2800':   'is_iokit_subsystem',
+        '4000':   'processor_set_subsystem',
+        '3000':   'processor_subsystem',
+        '1000':   'clock_subsystem',
+        '400':    'host_priv_subsystem',
+        '200':    'mach_host_subsystem',
+        '3200':   'mach_port_subsystem',
+        '4800':   'mach_vm_subsystem'
+    }
+    mig_e_addr = get_name_ea_simple("mig_e")
+    subsystems_addr = ida_bytes.get_qword(mig_e_addr)
+    while subsystems_addr & 0xfffffff000000000 ==  0xfffffff000000000:
+        num_start = ida_bytes.get_dword(subsystems_addr+8)
+        num_end = ida_bytes.get_dword(subsystems_addr+12)
+        subsystems_name = ''
+        if str(num_start) in known_subsystems.keys():
+            subsystems_name = known_subsystems[str(num_start)]
+        else:
+            subsystems_name = 'mig_subsystem_' + str(num_start)
+        idc.set_name(subsystems_addr, subsystems_name, idc.SN_CHECK)
+        print("[+] {}: 0x{:016x}".format(subsystems_name, subsystems_addr))
+
+        mig_e_addr += 8
+        subsystems_addr = ida_bytes.get_qword(mig_e_addr)
+
 
 if __name__ == '__main__':
-    # find_panic()
-    # find_stack_chk_fail()
-    # find_assert()
-    # find_mig_init()
+    find_panic()
+    find_stack_chk_fail()
+    find_assert()
+    find_mac_policy_register()
+    find_PE_parse_boot_argn_internal()
+    find_mig_init()
+    find_mig_e()
+    find_mig_subsystems()
     find_ExceptionVectorsBase()
