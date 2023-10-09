@@ -56,7 +56,7 @@ def find_panic():
         if n > max_n:
             max_n = n
             panic = f.start_ea
-    
+
     set_name(panic, "_panic")
     print("[+] panic: 0x{0:x}".format(panic))
 
@@ -71,6 +71,10 @@ def find_assert():
 
 def find_mig_init():
     define_function_by_string("mig_init", "multiple entries with the same msgh_id @%s:%d")
+
+
+def find_kmem_init():
+    define_function_by_string("kmem_init", "kmem_init(0x%llx,0x%llx): vm_map_enter(0x%llx,0x%llx) error 0x%x @%s:%d")
 
 
 def find_mig_e():
@@ -121,7 +125,7 @@ def find_ExceptionVectorsBase():
     insn = ida_ua.insn_t()
     while msr_vbar_addr != ida_idaapi.BADADDR:
         reg_num = ida_bytes.get_dword(msr_vbar_addr) & 0xff
-        
+
         num_steps = 5
         cur_addr = msr_vbar_addr - 4
         candidate = 0
@@ -138,7 +142,6 @@ def find_ExceptionVectorsBase():
             print("[i] ExceptionVectorsBase: 0x{:016x}".format(candidate))
             return
         msr_vbar_addr = ida_search.find_binary(msr_vbar_addr+2, end_ea, MSR_VBAR, 16, ida_search.SEARCH_DOWN)
-        
 
 
 def find_mig_subsystems():
@@ -182,6 +185,7 @@ if __name__ == '__main__':
     find_panic()
     find_stack_chk_fail()
     find_assert()
+    find_kmem_init()
     find_mac_policy_register()
     find_PE_parse_boot_argn_internal()
     find_mig_init()
