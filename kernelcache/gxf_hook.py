@@ -90,16 +90,7 @@ class GXFHook(ida_idp.IDP_Hooks):
             mnem = GXFInstructions.lst[insntype]
             outctx.out_custom_mnem(mnem, MNEM_WIDTH)
             return True
-        # if outctx.insn.itype == GXFInstructions.GENTER:
-        #     outctx.out_custom_mnem("GENTER", MNEM_WIDTH)
-        #     return True
-        # elif outctx.insn.itype == GXFInstructions.GEXIT:
-        #     outctx.out_custom_mnem("GEXIT", MNEM_WIDTH)
-        #     return True
         return False
-
-    # def ev_out_operand(self, outctx, op):
-    #     pass
 
 class GXFExtensionPlugin(ida_idaapi.plugin_t):
     flags = ida_idaapi.PLUGIN_PROC | ida_idaapi.PLUGIN_HIDE
