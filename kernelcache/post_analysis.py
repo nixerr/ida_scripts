@@ -4,10 +4,22 @@ import ida_search
 import ida_idaapi
 import ida_strlist
 import ida_bytes
+import ida_idc
 
 
 base_ea = idaapi.get_imagebase()
 end_ea = ida_segment.get_last_seg().start_ea
+slot = 0
+
+def mark(name):
+    global slot
+    name_addr = get_name_ea_simple(name)
+    if name_addr == ida_idaapi.BADADDR:
+        return
+
+    ida_idc.mark_position(name_addr, -1, 0, 0, slot, name)
+    slot += 1
+
 
 def count_xref_to_func(ea):
     return len(list(idautils.XrefsTo(ea)))
@@ -21,7 +33,7 @@ def find_string_address(s):
         if c and c == s.encode():
             return sc.ea
 
-    return BADADDR
+    return ida_idaapi.BADADDR
 
 
 def find_function_with_string(s):
@@ -61,20 +73,17 @@ def find_panic():
     print("[+] panic: 0x{0:x}".format(panic))
 
 
-def find_stack_chk_fail():
-    define_function_by_string("__stack_chk_fail", "stack_protector.c")
-
-
-def find_assert():
-    define_function_by_string("assert", "%s:%d Assertion failed: %s")
-
-
-def find_mig_init():
+def find_common_functions():
+    define_function_by_string("vm_map_init", "vm_memory_malloc_no_cow_mask")
+    define_function_by_string("load_static_trust_cache", "unexpected size for TrustCache property: %u != %zu @%s:%d")
+    define_function_by_string("trust_cache_runtime_init", "image4 interface not available @%s:%d")
     define_function_by_string("mig_init", "multiple entries with the same msgh_id @%s:%d")
-
-
-def find_kmem_init():
     define_function_by_string("kmem_init", "kmem_init(0x%llx,0x%llx): vm_map_enter(0x%llx,0x%llx) error 0x%x @%s:%d")
+    define_function_by_string("__strncpy_chk", "__strncpy_chk object size check failed: dst %p, src %p, (%zu < %zu) @%s:%d")
+    define_function_by_string("assert", "%s:%d Assertion failed: %s")
+    define_function_by_string("__stack_chk_fail", "stack_protector.c")
+    define_function_by_string("arm_init", "arm_init")
+    define_function_by_string("kernel_bootstrap", "load_context - done")
 
 
 def find_mig_e():
@@ -182,13 +191,19 @@ def find_mig_subsystems():
 
 
 if __name__ == '__main__':
+    find_common_functions()
     find_panic()
-    find_stack_chk_fail()
-    find_assert()
-    find_kmem_init()
     find_mac_policy_register()
     find_PE_parse_boot_argn_internal()
     find_mig_init()
-    find_mig_e()
     find_mig_subsystems()
     find_ExceptionVectorsBase()
+
+    need_to_mark = [
+        "ExceptionVectorsBase",
+        "vm_map_init",
+        "mig_e",
+        "arm_init"
+    ]
+    for n in need_to_mark:
+        mark(n)
