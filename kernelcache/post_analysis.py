@@ -195,7 +195,7 @@ if __name__ == '__main__':
     find_panic()
     find_mac_policy_register()
     find_PE_parse_boot_argn_internal()
-    find_mig_init()
+    find_mig_e()
     find_mig_subsystems()
     find_ExceptionVectorsBase()
 
