@@ -73,6 +73,26 @@ def find_panic():
     print("[+] panic: 0x{0:x}".format(panic))
 
 
+def find_os_log_internal():
+    failed_to_init_addr = find_string_address("failed to initialize compression: %d!\n")
+    xrefs = idautils.XrefsTo(failed_to_init_addr)
+    max_step = 8
+    insn = ida_ua.insn_t()
+    for xref in xrefs:
+        curr_addr = xref.frm
+        while max_step:
+            curr_addr += 4
+            max_step -= 1
+            if ida_ua.print_insn_mnem(curr_addr) == 'BL' and ida_ua.decode_insn(insn, curr_addr):
+                if len(insn.ops) > 1:
+                    os_log_internal_addr = insn.ops[0].addr
+                    set_name(os_log_internal_addr, "__os_log_internal")
+                    print("[+] __os_log_internal: 0x{:016x}".format(os_log_internal_addr))
+                    return
+
+    print("[-] not found: __os_log_internal")
+
+
 def find_common_functions():
     define_function_by_string("vm_map_init", "vm_memory_malloc_no_cow_mask")
     define_function_by_string("load_static_trust_cache", "unexpected size for TrustCache property: %u != %zu @%s:%d")
@@ -84,6 +104,7 @@ def find_common_functions():
     define_function_by_string("__stack_chk_fail", "stack_protector.c")
     define_function_by_string("arm_init", "arm_init")
     define_function_by_string("kernel_bootstrap", "load_context - done")
+    define_function_by_string("__ZN11OSMetaClassC2EPKcPKS_j", "OSMetaClass: preModLoad() wasn't called for class %s (runtime internal error).")
 
 
 def find_mig_e():
@@ -193,6 +214,7 @@ def find_mig_subsystems():
 if __name__ == '__main__':
     find_common_functions()
     find_panic()
+    find_os_log_internal()
     find_mac_policy_register()
     find_PE_parse_boot_argn_internal()
     find_mig_e()
