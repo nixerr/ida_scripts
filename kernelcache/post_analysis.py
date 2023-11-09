@@ -93,6 +93,26 @@ def find_os_log_internal():
     print("[-] not found: __os_log_internal")
 
 
+def find_kernel_debug():
+    mov_w0_1a10011 = "20 02 80 52 20 34 A0 72"
+    mov_w0_1a10011_addr = ida_search.find_binary(base_ea, end_ea, mov_w0_1a10011, 16, ida_search.SEARCH_DOWN)
+    if mov_w0_1a10011_addr != ida_idaapi.BADADDR:
+        max_step = 6
+        cur_addr = mov_w0_1a10011_addr
+        insn = ida_ua.insn_t()
+        while max_step:
+            cur_addr += 4
+            max_step -= 1
+            if ida_ua.print_insn_mnem(cur_addr) == 'BL' and ida_ua.decode_insn(insn, cur_addr):
+                if len(insn.ops) > 1:
+                    kernel_debug_addr = insn.ops[0].addr
+                    set_name(kernel_debug_addr, "_kernel_debug")
+                    print("[+] _kernel_debug: 0x{:016x}".format(kernel_debug_addr))
+                    return
+
+    print("[-] not ofund: _kernel_debug")
+
+
 def find_common_functions():
     define_function_by_string("vm_map_init", "vm_memory_malloc_no_cow_mask")
     define_function_by_string("load_static_trust_cache", "unexpected size for TrustCache property: %u != %zu @%s:%d")
@@ -215,6 +235,7 @@ if __name__ == '__main__':
     find_common_functions()
     find_panic()
     find_os_log_internal()
+    find_kernel_debug()
     find_mac_policy_register()
     find_PE_parse_boot_argn_internal()
     find_mig_e()
