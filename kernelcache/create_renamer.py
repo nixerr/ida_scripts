@@ -9,6 +9,7 @@ os_log_start   = None
 text_start     = None
 text_end       = None
 driver_name    = None
+has_os_log_seg = False
 
 TEMPLATE = """
 import idautils
@@ -31,6 +32,7 @@ cstring_end       = None
 cstring_start     = None
 os_log_end        = None
 os_log_start      = None
+has_os_log_seg    = False
 
 
 def init():
@@ -38,6 +40,7 @@ def init():
   global cstring_start
   global os_log_end
   global os_log_start
+  global has_os_log_seg
 
   if driver_name == None:
     print("[-] driver_name: None")
@@ -69,23 +72,27 @@ def init():
 
     if driver_name in seg_name and '__os_log' in seg_name:
       os_log_start = seg_ea
+      has_os_log_seg = True
       is_next_os_log_end = True
       continue
 
 
-  if cstring_start == None or os_log_start == None:
+  if cstring_start == None or (has_os_log_seg == True and os_log_start == None):
     print("[-] Not found needed segments")
     return False
 
   print("[+] Found needed segments:")
   print("  * cstring: 0x{:016x} - 0x{:016x}".format(cstring_start, cstring_end))
-  print("  * os_log: 0x{:016x} - 0x{:016x}".format(os_log_start, os_log_end))
+  if has_os_log_seg == True:
+    print("  * os_log: 0x{:016x} - 0x{:016x}".format(os_log_start, os_log_end))
 
   return True
 
 
 def is_os_log(ea):
-  return os_log_start <= ea < os_log_end
+  if has_os_log_seg == True:
+    return os_log_start <= ea < os_log_end
+  return False
 
 
 def is_cstring(ea):
@@ -246,6 +253,7 @@ def init():
   global text_start
   global text_end
   global driver_name
+  global has_os_log_seg
 
   driver_name = ida_kernwin.ask_str("", 0, "Driver name")
   if driver_name == None or driver_name == "":
@@ -289,18 +297,22 @@ def init():
 
     if driver_name in seg_name and '__os_log' in seg_name and os_log_start == None:
       os_log_start = seg_ea
+      has_os_log_seg = True
       is_next_os_log_end = True
       continue
 
   print("[+] Found needed segments:")
   print("  * text: 0x{:016x} - 0x{:016x}".format(text_start, text_end))
   print("  * cstring: 0x{:016x} - 0x{:016x}".format(cstring_start, cstring_end))
-  print("  * os_log: 0x{:016x} - 0x{:016x}".format(os_log_start, os_log_end))
+  if has_os_log_seg == True:
+    print("  * os_log: 0x{:016x} - 0x{:016x}".format(os_log_start, os_log_end))
   return True
 
 
 def is_os_log(ea):
-  return os_log_start <= ea <= os_log_end
+  if has_os_log_seg == True:
+    return os_log_start <= ea <= os_log_end
+  return False
 
 
 def is_cstring(ea):
