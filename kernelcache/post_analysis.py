@@ -110,7 +110,31 @@ def find_kernel_debug():
                     print("[+] _kernel_debug: 0x{:016x}".format(kernel_debug_addr))
                     return
 
-    print("[-] not ofund: _kernel_debug")
+    print("[-] not found: _kernel_debug")
+
+
+def find_safeMetaCast():
+    skip_bl_insn_counter = 3
+    starting_from_addr = find_string_address("Starting from prelinked kernel.")
+    if starting_from_addr != ida_idaapi.BADADDR:
+        xrefs = idautils.XrefsTo(starting_from_addr)
+        insn = ida_ua.insn_t()
+        max_step = 30
+        for xref in xrefs:
+            curr_addr = xref.frm
+            while max_step:
+                curr_addr += 4
+                max_step -= 1
+                if ida_ua.print_insn_mnem(curr_addr) == 'BL' and ida_ua.decode_insn(insn, curr_addr):
+                    if skip_bl_insn_counter == 0 and len(insn.ops) > 1:
+                        safe_meta_cast_addr = insn.ops[0].addr
+                        set_name(safe_meta_cast_addr, "__ZN15OSMetaClassBase12safeMetaCastEPKS_PK11OSMetaClass")
+                        print("[+] OSMetaClassBase::safeMetaCast : 0x{:016x}".format(safe_meta_cast_addr))
+                        return
+                    else:
+                        skip_bl_insn_counter -= 1
+
+    print("[-] not found: OSMetaClassBase::safeMetaCast")
 
 
 def find_common_functions():
@@ -125,6 +149,8 @@ def find_common_functions():
     define_function_by_string("arm_init", "arm_init")
     define_function_by_string("kernel_bootstrap", "load_context - done")
     define_function_by_string("__ZN11OSMetaClassC2EPKcPKS_j", "OSMetaClass: preModLoad() wasn't called for class %s (runtime internal error).")
+    define_function_by_string("handle_user_abort", "Apparently on interrupt stack when taking user abort!\n")
+    define_function_by_string("handle_kernel_abort", "Unexpected fault in kernel static region\n")
 
 
 def find_mig_e():
@@ -241,6 +267,7 @@ if __name__ == '__main__':
     find_mig_e()
     find_mig_subsystems()
     find_ExceptionVectorsBase()
+    find_safeMetaCast()
 
     need_to_mark = [
         "ExceptionVectorsBase",
