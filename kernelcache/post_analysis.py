@@ -200,6 +200,9 @@ def find_ExceptionVectorsBase():
     msr_vbar_addr = ida_search.find_binary(base_ea, end_ea, MSR_VBAR, 16, ida_search.SEARCH_DOWN)
     insn = ida_ua.insn_t()
     while msr_vbar_addr != ida_idaapi.BADADDR:
+        if msr_vbar_addr % 4 != 0:
+            msr_vbar_addr = ida_search.find_binary(msr_vbar_addr+2, end_ea, MSR_VBAR, 16, ida_search.SEARCH_DOWN)
+            continue
         reg_num = ida_bytes.get_dword(msr_vbar_addr) & 0xff
 
         num_steps = 5
