@@ -1,19 +1,24 @@
 import idautils
 import ida_funcs
+import ida_segment
 import ida_search
 import ida_idaapi
+import idaapi
 import ida_strlist
 import ida_bytes
 import ida_idc
+import ida_idp
+import ida_ua
+import ida_name
+import idc
 
-
-base_ea = idaapi.get_imagebase()
-end_ea = ida_segment.get_last_seg().start_ea
-slot = 0
+base_ea = None
+end_ea = None
+slot = None
 
 def mark(name):
     global slot
-    name_addr = get_name_ea_simple(name)
+    name_addr = idc.get_name_ea_simple(name)
     if name_addr == ida_idaapi.BADADDR:
         return
 
@@ -27,9 +32,9 @@ def count_xref_to_func(ea):
 
 def find_string_address(s):
     sc = ida_strlist.string_info_t()
-    for i in range(0,ida_strlist.get_strlist_qty()):
+    for i in range(0, ida_strlist.get_strlist_qty()):
         ida_strlist.get_strlist_item(sc,i)
-        c = ida_bytes.get_strlit_contents(sc.ea,sc.length,sc.type)
+        c = ida_bytes.get_strlit_contents(sc.ea, sc.length, sc.type)
         if c and c == s.encode():
             return sc.ea
 
@@ -56,7 +61,7 @@ def define_function_by_string(n, s):
 
 
 def find_panic():
-    panic_trap_to_debugger_addr = get_name_ea_simple("panic_trap_to_debugger")
+    panic_trap_to_debugger_addr = idc.get_name_ea_simple("panic_trap_to_debugger")
     xrefs = idautils.XrefsTo(panic_trap_to_debugger_addr)
     max_n = 0
     panic = 0
@@ -69,7 +74,7 @@ def find_panic():
             max_n = n
             panic = f.start_ea
 
-    set_name(panic, "_panic")
+    idc.set_name(panic, "_panic")
     print("[+] panic: 0x{0:x}".format(panic))
 
 
@@ -86,7 +91,7 @@ def find_os_log_internal():
             if ida_ua.print_insn_mnem(curr_addr) == 'BL' and ida_ua.decode_insn(insn, curr_addr):
                 if len(insn.ops) > 1:
                     os_log_internal_addr = insn.ops[0].addr
-                    set_name(os_log_internal_addr, "__os_log_internal")
+                    idc.set_name(os_log_internal_addr, "__os_log_internal")
                     print("[+] __os_log_internal: 0x{:016x}".format(os_log_internal_addr))
                     return
 
@@ -94,6 +99,7 @@ def find_os_log_internal():
 
 
 def find_kernel_debug():
+    global base_ea, end_ea
     mov_w0_1a10011 = "20 02 80 52 20 34 A0 72"
     mov_w0_1a10011_addr = ida_search.find_binary(base_ea, end_ea, mov_w0_1a10011, 16, ida_search.SEARCH_DOWN)
     if mov_w0_1a10011_addr != ida_idaapi.BADADDR:
@@ -106,7 +112,7 @@ def find_kernel_debug():
             if ida_ua.print_insn_mnem(cur_addr) == 'BL' and ida_ua.decode_insn(insn, cur_addr):
                 if len(insn.ops) > 1:
                     kernel_debug_addr = insn.ops[0].addr
-                    set_name(kernel_debug_addr, "_kernel_debug")
+                    ida_name.set_name(kernel_debug_addr, "_kernel_debug")
                     print("[+] _kernel_debug: 0x{:016x}".format(kernel_debug_addr))
                     return
 
@@ -128,7 +134,7 @@ def find_safeMetaCast():
                 if ida_ua.print_insn_mnem(curr_addr) == 'BL' and ida_ua.decode_insn(insn, curr_addr):
                     if skip_bl_insn_counter == 0 and len(insn.ops) > 1:
                         safe_meta_cast_addr = insn.ops[0].addr
-                        set_name(safe_meta_cast_addr, "__ZN15OSMetaClassBase12safeMetaCastEPKS_PK11OSMetaClass")
+                        idc.set_name(safe_meta_cast_addr, "__ZN15OSMetaClassBase12safeMetaCastEPKS_PK11OSMetaClass")
                         print("[+] OSMetaClassBase::safeMetaCast : 0x{:016x}".format(safe_meta_cast_addr))
                         return
                     else:
@@ -149,12 +155,13 @@ def find_common_functions():
     define_function_by_string("arm_init", "arm_init")
     define_function_by_string("kernel_bootstrap", "load_context - done")
     define_function_by_string("__ZN11OSMetaClassC2EPKcPKS_j", "OSMetaClass: preModLoad() wasn't called for class %s (runtime internal error).")
-    define_function_by_string("handle_user_abort", "Apparently on interrupt stack when taking user abort!\n")
+    # define_function_by_string("handle_user_abort", "Apparently on interrupt stack when taking user abort!\n")
+    define_function_by_string("handle_user_abort", "User abort from non-interruptible context")
     define_function_by_string("handle_kernel_abort", "Unexpected fault in kernel static region\n")
 
 
 def find_mig_e():
-    mig_init_addr = get_name_ea_simple("mig_init")
+    mig_init_addr = idc.get_name_ea_simple("mig_init")
     # skip PACIBSP
     mig_init_addr += 4
     max_step = 8
@@ -164,7 +171,7 @@ def find_mig_e():
         if ida_ua.print_insn_mnem(mig_init_addr) == 'ADRL' and ida_ua.decode_insn(insn, mig_init_addr):
             if len(insn.ops) > 2 and insn.ops[1].type == ida_ua.o_imm:
                 mig_e_addr = insn.ops[1].value
-                set_name(mig_e_addr, "mig_e", idc.SN_CHECK)
+                idc.set_name(mig_e_addr, "mig_e", idc.SN_CHECK)
                 print("[+] mig_e: 0x{:016x}".format(mig_e_addr))
                 return
         mig_init_addr += 4
@@ -217,7 +224,7 @@ def find_ExceptionVectorsBase():
             cur_addr -= 4
 
         if ida_bytes.get_dword(candidate) != 0x14000000:
-            set_name(candidate, "ExceptionVectorsBase", idc.SN_CHECK)
+            idc.set_name(candidate, "ExceptionVectorsBase", idc.SN_CHECK)
             print("[i] ExceptionVectorsBase: 0x{:016x}".format(candidate))
             return
         msr_vbar_addr = ida_search.find_binary(msr_vbar_addr+2, end_ea, MSR_VBAR, 16, ida_search.SEARCH_DOWN)
@@ -243,7 +250,7 @@ def find_mig_subsystems():
         '3200':   'mach_port_subsystem',
         '4800':   'mach_vm_subsystem'
     }
-    mig_e_addr = get_name_ea_simple("mig_e")
+    mig_e_addr = idc.get_name_ea_simple("mig_e")
     subsystems_addr = ida_bytes.get_qword(mig_e_addr)
     while subsystems_addr & 0xfffffff000000000 ==  0xfffffff000000000:
         num_start = ida_bytes.get_dword(subsystems_addr+8)
@@ -259,8 +266,14 @@ def find_mig_subsystems():
         mig_e_addr += 8
         subsystems_addr = ida_bytes.get_qword(mig_e_addr)
 
+def init():
+    global base_ea, end_ea, slot
+    base_ea = idaapi.get_imagebase()
+    end_ea = ida_segment.get_last_seg().start_ea
+    slot = 0
 
-if __name__ == '__main__':
+def post_analyzer():
+    init()
     find_common_functions()
     find_panic()
     find_os_log_internal()
@@ -280,3 +293,6 @@ if __name__ == '__main__':
     ]
     for n in need_to_mark:
         mark(n)
+
+if __name__ == '__main__':
+    post_analyzer()

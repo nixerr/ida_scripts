@@ -2,6 +2,10 @@ import ida_segment
 import ida_search
 import ida_funcs
 import ida_ua
+import ida_name
+import idaapi
+# import idalog
+# import logging
 
 def find_panic_trap_to_debugger():
     base_ea     = idaapi.get_imagebase()
@@ -17,11 +21,11 @@ def find_panic_trap_to_debugger():
     while cur_addr != func_end:
         ida_ua.create_insn(cur_addr)
         cur_addr += 4
-     
-    func_str = ida_funcs.func_t(func_start, func_end, FUNC_NORET)
+
+    func_str = ida_funcs.func_t(func_start, func_end, ida_funcs.FUNC_NORET)
 
     if (ida_funcs.add_func_ex(func_str)):
-        set_name(func_start, "panic_trap_to_debugger")
+        ida_name.set_name(func_start, "panic_trap_to_debugger")
     print("[i] panic_trap_to_debugger: 0x{0:x}".format(func_start))
 
 if __name__ == '__main__':
