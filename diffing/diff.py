@@ -51,12 +51,12 @@ def generate_binexport(target, binexport, move_to):
     try:
         os.rename(binexport, os.path.join(move_to, binexport))
     except:
-        pass
+        os.remove(binexport)
 
     try:
         os.rename(target + '.i64', os.path.join(move_to, os.path.basename(target) + '.i64'))
     except:
-        pass
+        os.remove(target + '.i64')
 
 
 def handle_driver(version, driver):
