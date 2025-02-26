@@ -5,6 +5,7 @@ import pprint
 import argparse
 import subprocess
 import multiprocessing
+from multiprocessing import Pool
 
 
 kdk_path = 'D:\\work\\apple\\platform\\kdk'
@@ -14,7 +15,7 @@ bin_path = os.path.join('Contents', 'MacOS')
 plg_path = "D:\\work\\apple\\tools\\ida_plugins\\ida_scripts\\diffing\\binexp.py"
 out_path = "D:\\work\\apple\\bindiffing\\out\\"
 ida_cmd  = ["idat64", "-A", "-T\"Mach-O\""]
-
+pool = None
 
 def arguments():
     parser = argparse.ArgumentParser(
@@ -32,6 +33,8 @@ def arguments():
         help = 'Output directory for binexport files')
     parser.add_argument('-a', '--all', action="store_true",
         help = 'Generate binexports for all available versions')
+    parser.add_argument('-t', '--threads', type=int, default=16,
+        help = 'Number of parallel IDA Pro instances')
     parser.add_argument('-l', '--list', action="store_true",
         help = 'List all available KDK versions')
 
@@ -81,7 +84,7 @@ def handle_driver(version, driver):
 
     binexport_name = driver + '_' + version + '.binexport'
     move_to = os.path.join(out_path, version)
-    multiprocessing.Process(target=generate_binexport, args=(bin_driver_file, binexport_name, move_to,)).start()
+    pool.apply_async(generate_binexport, args=(bin_driver_file, binexport_name, move_to,))
 
 
 def handle_kernel(version, kernel):
@@ -98,7 +101,7 @@ def handle_kernel(version, kernel):
 
     binexport_name = kernel + '_' + version + '.binexport'
     move_to = os.path.join(out_path, version)
-    multiprocessing.Process(target=generate_binexport, args=(kdk_kernel_file, binexport_name, move_to,)).start()
+    pool.apply_async(generate_binexport, args=(kdk_kernel_file, binexport_name, move_to,))
 
 
 def scan_kdk_directory() -> list:
@@ -112,6 +115,7 @@ def scan_kdk_directory() -> list:
 
 
 def main():
+    global pool
     args = arguments()
     versions = scan_kdk_directory()
 
@@ -127,6 +131,7 @@ def main():
     if args.all == True:
         versions = scan_kdk_directory()
 
+    pool = Pool(processes=args.threads)
     for version in versions:
         kdk_version_dir = os.path.join(kdk_path, 'KDK_' + version + '.kdk')
         if os.path.exists(kdk_version_dir) == False:
@@ -139,6 +144,8 @@ def main():
         for kernel in args.kernels:
             handle_kernel(version, kernel)
 
+    pool.close()
+    pool.join()
 
 if __name__ == '__main__':
     main()
