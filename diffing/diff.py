@@ -119,6 +119,7 @@ def main():
         versions = scan_kdk_directory()
         for version in versions:
             print(version)
+        return
 
     if args.versions != None:
         versions = args.versions
