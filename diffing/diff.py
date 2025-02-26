@@ -14,8 +14,76 @@ krn_path = os.path.join('System', 'Library', 'Kernels')
 bin_path = os.path.join('Contents', 'MacOS')
 plg_path = "D:\\work\\apple\\tools\\ida_plugins\\ida_scripts\\diffing\\binexp.py"
 out_path = "D:\\work\\apple\\bindiffing\\out\\"
+tmp_path = "D:\\work\\apple\\bindiffing\\tmp\\"
 ida_cmd  = ["idat64", "-A", "-T\"Mach-O\""]
 pool = None
+
+
+class KDK:
+    def __init__(self, is_kernel, version, name):
+        self.is_kernel = is_kernel
+        self.name      = name
+        self.version   = version
+        self.kdk_path  = os.path.join(kdk_path, f"KDK_{version}.kdk")
+
+    def fini_init(self):
+        self.save_dir         = os.path.join(out_path, self.version)
+        self.binexport        = f"{self.name}_{self.version}.binexport"
+        self.idb              = f"{self.binary}.i64"
+        self.output_dir       = os.path.join(out_path, self.version)
+        self.output_binexport = os.path.join(self.output_dir, f"{os.path.basename(self.binexport)}")
+        self.output_idb       = os.path.join(self.output_dir, f"{os.path.basename(self.binary)}.i64")
+
+    def prepare_ida_cmd(self):
+        self.ida_cmd = list(ida_cmd)
+        self.ida_cmd.extend([f"-S{plg_path} \"{self.binexport}\""])
+        self.ida_cmd.extend([self.binary])
+
+    def run_ida_cmd(self):
+        self.prepare_ida_cmd()
+        subprocess.run(self.ida_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def commit(self):
+        os.rename(self.idb, self.output_idb)
+        os.rename(self.binexport, self.output_binexport)
+
+    def handle(self, pool):
+        self.cleanup()
+        if self.need_to_generate_idb() and self.need_to_generate_binexport():
+            pool.apply_async(generate_binexport, args=(self,))
+        else:
+            print(f"[!] Exists({os.path.basename(self.output_idb)}) is {self.need_to_generate_idb() == False}")
+            print(f"[!] Exists({os.path.basename(self.output_binexport)}) is {self.need_to_generate_binexport() == False}")
+
+    def cleanup(self):
+        if os.path.exists(self.idb):
+            os.remove(self.idb)
+
+    def need_to_generate_idb(self):
+        return os.path.exists(self.output_idb) == False
+
+    def need_to_generate_binexport(self):
+        return os.path.exists(self.output_binexport) == False
+
+    def create_output_dir(self):
+        if os.path.exists(self.output_dir) == False:
+            os.mkdir(self.output_dir)
+
+
+class Driver(KDK):
+    def __init__(self, version, name):
+        super().__init__(False, version, name)
+        self.kdk_driver_dir = os.path.join(self.kdk_path, ext_path, f"{name}.kext")
+        self.binary = os.path.join(self.kdk_driver_dir, bin_path, self.name)
+        self.fini_init()
+
+
+class Kernel(KDK):
+    def __init__(self, version, name):
+        super().__init__(True, version, name)
+        self.binary = os.path.join(self.kdk_path, krn_path, self.name)
+        self.fini_init()
+
 
 def arguments():
     parser = argparse.ArgumentParser(
@@ -43,65 +111,21 @@ def arguments():
     return args
 
 
-def generate_binexport(target, binexport, move_to):
-    cur_ida_cmd = list(ida_cmd)
-    cur_ida_cmd.extend(["-S{} {}".format(plg_path, binexport)])
-    cur_ida_cmd.extend([target])
-    # print(cur_ida_cmd)
-    subprocess.run(cur_ida_cmd)
-    if os.path.exists(move_to) == False:
-        os.mkdir(move_to)
-    try:
-        os.rename(binexport, os.path.join(move_to, binexport))
-    except:
-        os.remove(binexport)
-
-    try:
-        os.rename(target + '.i64', os.path.join(move_to, os.path.basename(target) + '.i64'))
-    except:
-        os.remove(target + '.i64')
+def generate_binexport(m):
+    print(f"[i] Generating binexport for {m.name}_{m.version}")
+    m.run_ida_cmd()
+    m.create_output_dir()
+    m.commit()
 
 
 def handle_driver(version, driver):
-    kdk_version_dir = os.path.join(kdk_path, 'KDK_' + version + '.kdk')
-    kdk_driver_dir = os.path.join(
-        kdk_version_dir,
-        ext_path,
-        driver + '.kext')
-    if os.path.exists(kdk_driver_dir) == False:
-        print(f"[-] Not found driver : {kdk_driver_dir}")
-        return
-
-    bin_driver_file = os.path.join(
-        kdk_driver_dir,
-        bin_path,
-        driver
-    )
-
-    if os.path.exists(bin_driver_file) == False:
-        print(f"[-] Not found driver binary : {bin_driver_file}")
-        return
-
-    binexport_name = driver + '_' + version + '.binexport'
-    move_to = os.path.join(out_path, version)
-    pool.apply_async(generate_binexport, args=(bin_driver_file, binexport_name, move_to,))
+    driver = Driver(version, driver)
+    driver.handle(pool)
 
 
 def handle_kernel(version, kernel):
-    kdk_version_dir = os.path.join(kdk_path, 'KDK_' + version + '.kdk')
-    kdk_kernel_file = os.path.join(
-        kdk_version_dir,
-        krn_path,
-        kernel
-    )
-
-    if os.path.exists(kdk_kernel_file) == False:
-        printf("f[-] Not found kernel : {kdk_kernel_file}")
-        return
-
-    binexport_name = kernel + '_' + version + '.binexport'
-    move_to = os.path.join(out_path, version)
-    pool.apply_async(generate_binexport, args=(kdk_kernel_file, binexport_name, move_to,))
+    kernel = Kernel(version, kernel)
+    kernel.handle(pool)
 
 
 def scan_kdk_directory() -> list:
@@ -133,7 +157,7 @@ def main():
 
     pool = Pool(processes=args.threads)
     for version in versions:
-        kdk_version_dir = os.path.join(kdk_path, 'KDK_' + version + '.kdk')
+        kdk_version_dir = os.path.join(kdk_path, f"KDK_{version}.kdk")
         if os.path.exists(kdk_version_dir) == False:
             print(f"[-] Not found version : {kdk_version_dir}")
             continue
