@@ -123,7 +123,6 @@ class BinDiffWorkSpace():
         return os.path.join(self.path, f"{v1} x {v2}")
 
     def is_diff_exists(self, v1, v2):
-        # return os.path.exists(self.diff_dir(v1, v2)) == True
         return (v1, v2) in self.existed_diffs
 
     def add_diff(self, v1, v2):
@@ -151,7 +150,7 @@ class BinDiffWorkSpace():
         entries = sorted(entries, key=cmp_to_key(sort_entries))
         cur.execute("DELETE FROM diffs")
         for entry in entries:
-             cur.execute(f"INSERT INTO diffs(matchesDbPath, isfunctiondiff) VALUES('{entry}', 0)")
+            cur.execute(f"INSERT INTO diffs(matchesDbPath, isfunctiondiff) VALUES('{entry}', 0)")
         self.con.commit()
 
 
@@ -210,10 +209,7 @@ def compare_version(v1, v2):
 
 
 def sort_entries(e1, e2):
-    if e1.split(' x ')[0].split('_')[1] < e2.split(' x ')[0].split('_')[1]:
-        return -1
-    else:
-        return 1
+    return compare_version(e1.split(' x ')[0], e2.split(' x ')[0])
 
 
 def version_is_beta(v):
@@ -290,6 +286,7 @@ def main():
             if ws.is_diff_exists(v1, v2) == False:
                 ws.add_diff(v1, v2)
         ws.sort_db()
+
 
 if __name__ == '__main__':
     main()
