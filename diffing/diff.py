@@ -3,6 +3,7 @@
 import sys, os
 import pprint
 import shutil
+import struct
 import sqlite3
 import argparse
 import subprocess
@@ -20,7 +21,7 @@ plg_path = "D:\\work\\apple\\tools\\ida_plugins\\ida_scripts\\diffing\\binexp.py
 workspace_out_path = "D:\\work\\apple\\bindiffing\\workspaces\\"
 out_path = "D:\\work\\apple\\bindiffing\\out\\"
 tmp_path = "D:\\work\\apple\\bindiffing\\tmp\\"
-ida_cmd  = ["idat64", "-A", "-T\"Mach-O\""]
+ida_cmd  = ["idat64", "-A"]
 pool = None
 
 
@@ -41,8 +42,16 @@ class KDK:
 
     def prepare_ida_cmd(self):
         self.ida_cmd = list(ida_cmd)
-        self.ida_cmd.extend([f"-S{plg_path} \"{self.binexport}\""])
-        self.ida_cmd.extend([self.binary])
+        if self.is_macho_fat():
+            self.ida_cmd.append("-TFat Mach-O File, 2")
+        else:
+            self.ida_cmd.append("-TMach-O")
+        self.ida_cmd.append(f"-S{plg_path} {self.binexport}")
+        self.ida_cmd.append(self.binary)
+
+    def is_macho_fat(self):
+        with open(self.binary, "rb") as fd:
+            return struct.unpack("<I", fd.read(4))[0] == 0xbebafeca
 
     def run_ida_cmd(self):
         self.prepare_ida_cmd()
@@ -125,7 +134,12 @@ class BinDiffWorkSpace():
     def is_diff_exists(self, v1, v2):
         return (v1, v2) in self.existed_diffs
 
+    def is_binexport_exists(self, v):
+        return os.path.exists(os.path.join(out_path, v, f"{self.name}_{v}.BinExport"))
+
     def add_diff(self, v1, v2):
+        if self.is_binexport_exists(v1) == False or self.is_binexport_exists(v2) == False:
+            return
         diff_dir = self.diff_dir(v1, v2)
         os.mkdir(diff_dir)
         path_to_v1_binexport = os.path.join(out_path, v1, f"{self.name}_{v1}.BinExport")
