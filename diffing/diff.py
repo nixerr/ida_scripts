@@ -216,6 +216,23 @@ def handle_kernel(version, kernel):
 
 
 def compare_version(v1, v2):
+    n1 = v1.split('_')[0].split('.')
+    n2 = v2.split('_')[0].split('.')
+
+    for i in range(max(len(n1), len(n2))):
+        if i < len(n1) and i < len(n2):
+            if n1[i] == n2[i]:
+                continue
+            if n1[i] < n2[i]:
+                return -1
+            elif n1[i] > n2[i]:
+                return 1
+        elif i < len(n1) and i >= len(n2):
+            return 1
+        elif i >= len(n1) and i < len(n2):
+            return -1
+
+
     if v1.split('_')[1] < v2.split('_')[1]:
         return -1
     else:
