@@ -46,7 +46,8 @@ def find_function_with_string(s):
     if s_addr != ida_idaapi.BADADDR:
         for xref in idautils.XrefsTo(s_addr):
             func = idaapi.get_func(xref.frm)
-            return func.start_ea
+            if func != None:
+                return func.start_ea
 
     return ida_idaapi.BADADDR
 
@@ -80,8 +81,10 @@ def find_panic():
 
 def find_os_log_internal():
     failed_to_init_addr = find_string_address("failed to initialize compression: %d!\n")
+    if (failed_to_init_addr == BADADDR):
+        failed_to_init_addr = find_string_address("Failed to initialize domain trie\n")
     xrefs = idautils.XrefsTo(failed_to_init_addr)
-    max_step = 8
+    max_step = 12
     insn = ida_ua.insn_t()
     for xref in xrefs:
         curr_addr = xref.frm
@@ -157,7 +160,7 @@ def find_common_functions():
     define_function_by_string("__ZN11OSMetaClassC2EPKcPKS_j", "OSMetaClass: preModLoad() wasn't called for class %s (runtime internal error).")
     # define_function_by_string("handle_user_abort", "Apparently on interrupt stack when taking user abort!\n")
     define_function_by_string("handle_user_abort", "User abort from non-interruptible context")
-    define_function_by_string("handle_kernel_abort", "Unexpected fault in kernel static region\n")
+    define_function_by_string("handle_kernel_abort", "Unexpected fault in kernel static region")
 
 
 def find_mig_e():
