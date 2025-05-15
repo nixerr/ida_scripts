@@ -81,7 +81,7 @@ def find_panic():
 
 def find_os_log_internal():
     failed_to_init_addr = find_string_address("failed to initialize compression: %d!\n")
-    if (failed_to_init_addr == BADADDR):
+    if (failed_to_init_addr == ida_idaapi.BADADDR):
         failed_to_init_addr = find_string_address("Failed to initialize domain trie\n")
     xrefs = idautils.XrefsTo(failed_to_init_addr)
     max_step = 12
@@ -161,6 +161,7 @@ def find_common_functions():
     # define_function_by_string("handle_user_abort", "Apparently on interrupt stack when taking user abort!\n")
     define_function_by_string("handle_user_abort", "User abort from non-interruptible context")
     define_function_by_string("handle_kernel_abort", "Unexpected fault in kernel static region")
+    define_function_by_string("mach_syscall", "Returned from exception_triage()? @%s:%d")
 
 
 def find_mig_e():
@@ -275,7 +276,7 @@ def init():
     end_ea = ida_segment.get_last_seg().start_ea
     slot = 0
 
-def post_analyzer():
+def run():
     init()
     find_common_functions()
     find_panic()
@@ -298,4 +299,4 @@ def post_analyzer():
         mark(n)
 
 if __name__ == '__main__':
-    post_analyzer()
+    run()

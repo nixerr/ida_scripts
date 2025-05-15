@@ -28,5 +28,8 @@ def find_panic_trap_to_debugger():
         ida_name.set_name(func_start, "panic_trap_to_debugger")
     print("[i] panic_trap_to_debugger: 0x{0:x}".format(func_start))
 
-if __name__ == '__main__':
+def run():
     find_panic_trap_to_debugger()
+
+if __name__ == '__main__':
+    run()
