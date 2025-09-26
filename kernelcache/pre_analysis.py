@@ -1,11 +1,9 @@
 import ida_segment
-import ida_search
 import ida_funcs
 import ida_ua
 import ida_name
 import idaapi
-# import idalog
-# import logging
+import ida_bytes
 
 def find_panic_trap_to_debugger():
     base_ea     = idaapi.get_imagebase()
@@ -13,9 +11,9 @@ def find_panic_trap_to_debugger():
     HINT_45h    = "BF 28 03 D5"
     PACIBSP     = "7F 23 03 D5"
 
-    hint        = ida_search.find_binary(base_ea, end_ea, HINT_45h, 16, 0)
-    func_start  = ida_search.find_binary(base_ea, hint, PACIBSP, 16, ida_search.SEARCH_UP)
-    func_end    = ida_search.find_binary(hint, end_ea, PACIBSP, 16, ida_search.SEARCH_DOWN)
+    hint        = ida_bytes.find_bytes(HINT_45h, base_ea)
+    func_start  = ida_bytes.find_bytes(PACIBSP, base_ea, None, hint, None, ida_bytes.BIN_SEARCH_BACKWARD, 16)
+    func_end    = ida_bytes.find_bytes(PACIBSP, hint, None, end_ea, None, ida_bytes.BIN_SEARCH_FORWARD, 16)
 
     cur_addr = func_start
     while cur_addr != func_end:
