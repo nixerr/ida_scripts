@@ -182,13 +182,15 @@ class myEmu_stage_init(Emu):
 
 def emulate_all_OSMetaClass_constructors():
     # Reconstruct parameters for call's to OSMetaClass::OSMetaClass
-    OSMetaClass_calls = []
+    OSMetaClass_calls = {}
 
     for seg_ea in Segments():
         if '__mod_init_func' in get_segm_name(seg_ea):
             seg = ida_segment.getseg(seg_ea)
             name = get_segm_name(seg_ea)
             driver_name = name.split(':')[0]
+
+            OSMetaClass_calls[driver_name] = []
 
             start_addr = seg.start_ea
             end_addr = seg.end_ea
@@ -215,7 +217,7 @@ def emulate_all_OSMetaClass_constructors():
                     raise EmulationWrong(emulator.dynamic_calls_of_osmetaclass, emulator.static_calls_of_osmetaclass)
 
                 for k in emulator.calls.keys():
-                    OSMetaClass_calls.append(emulator.calls[k])
+                    OSMetaClass_calls[driver_name].append(emulator.calls[k])
 
                 start_addr += 8
 
@@ -246,16 +248,17 @@ def apply_names(init_calls: list[OSMetaClassConstructorCall]):
 
 def dump_classes(init_calls: list[OSMetaClassConstructorCall], filename):
     with open(filename, 'w') as fd:
-        for call in init_calls:
-            class_name = call.get_name()
+        for driver in init_calls.keys():
+            for call in init_calls[driver]:
+                class_name = call.get_name()
 
-            if class_name == 'OSMetaClass' or class_name == 'OSObject':
-                continue
+                if class_name == 'OSMetaClass' or class_name == 'OSObject':
+                    continue
 
-            class_parent = get_class(init_calls, call.parent)
-            class_parent_name = class_parent.get_name()
+                # class_parent = get_class(init_calls, call.parent)
+                # class_parent_name = class_parent.get_name()
 
-            fd.write(f'class {class_name}: public {class_parent_name}\n')
+                fd.write(f'{driver}:{class_name}:{hex(call.size)}\n')
 
 
 class CSVConverter():
@@ -315,13 +318,13 @@ class CSVConverter():
 def main():
     init_calls = emulate_all_OSMetaClass_constructors()
 
-    print(f'Found OSMetaClass by emulating => {len(init_calls)}')
+    # print(f'Found OSMetaClass by emulating => {len(init_calls)}')
 
-    apply_names(init_calls)
+    # apply_names(init_calls)
     idc.auto_wait()
-    dump_classes(init_calls, 'classes.txt')
-    converter = CSVConverter('classes.txt', 'iokit.csv')
-    converter.convert()
+    dump_classes(init_calls, 'dclasses.txt')
+    # converter = CSVConverter('classes.txt', 'iokit.csv')
+    # converter.convert()
 
 
 if __name__ == '__main__':
