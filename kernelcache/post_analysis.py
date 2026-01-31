@@ -1,7 +1,6 @@
 import idautils
 import ida_funcs
 import ida_segment
-import ida_search
 import ida_idaapi
 import idaapi
 import ida_strlist
@@ -46,7 +45,7 @@ def find_function_with_string(s):
     if s_addr != ida_idaapi.BADADDR:
         for xref in idautils.XrefsTo(s_addr):
             func = idaapi.get_func(xref.frm)
-            if func != None:
+            if type(func) is ida_funcs.func_t:
                 return func.start_ea
 
     return ida_idaapi.BADADDR
@@ -68,7 +67,7 @@ def find_panic():
     panic = 0
     for xref in xrefs:
         f = ida_funcs.get_func(xref.frm)
-        if f == None:
+        if type(f) is not ida_funcs.func_t:
             continue
         n = count_xref_to_func(f.start_ea)
         if n > max_n:
@@ -104,7 +103,7 @@ def find_os_log_internal():
 def find_kernel_debug():
     global base_ea, end_ea
     mov_w0_1a10011 = "20 02 80 52 20 34 A0 72"
-    mov_w0_1a10011_addr = ida_search.find_binary(base_ea, end_ea, mov_w0_1a10011, 16, ida_search.SEARCH_DOWN)
+    mov_w0_1a10011_addr = ida_bytes.find_bytes(mov_w0_1a10011, base_ea, None, end_ea, 16, ida_bytes.BIN_SEARCH_FORWARD, 16)
     if mov_w0_1a10011_addr != ida_idaapi.BADADDR:
         max_step = 6
         cur_addr = mov_w0_1a10011_addr
@@ -208,11 +207,11 @@ def find_mac_policy_register():
 
 def find_ExceptionVectorsBase():
     MSR_VBAR = "? C0 18 D5"
-    msr_vbar_addr = ida_search.find_binary(base_ea, end_ea, MSR_VBAR, 16, ida_search.SEARCH_DOWN)
+    msr_vbar_addr = ida_bytes.find_bytes(MSR_VBAR, base_ea, None, end_ea, ida_bytes.BIN_SEARCH_FORWARD, 16)
     insn = ida_ua.insn_t()
     while msr_vbar_addr != ida_idaapi.BADADDR:
         if msr_vbar_addr % 4 != 0:
-            msr_vbar_addr = ida_search.find_binary(msr_vbar_addr+2, end_ea, MSR_VBAR, 16, ida_search.SEARCH_DOWN)
+            msr_vbar_addr = ida_bytes.find_bytes(MSR_VBAR, msr_vbar_addr+2, None, end_ea, ida_bytes.BIN_SEARCH_FORWARD, 16)
             continue
         reg_num = ida_bytes.get_dword(msr_vbar_addr) & 0xff
 
@@ -231,7 +230,7 @@ def find_ExceptionVectorsBase():
             idc.set_name(candidate, "ExceptionVectorsBase", idc.SN_CHECK)
             print("[i] ExceptionVectorsBase: 0x{:016x}".format(candidate))
             return
-        msr_vbar_addr = ida_search.find_binary(msr_vbar_addr+2, end_ea, MSR_VBAR, 16, ida_search.SEARCH_DOWN)
+        msr_vbar_addr = ida_bytes.find_bytes(MSR_VBAR, msr_vbar_addr+2, None, end_ea, ida_bytes.BIN_SEARCH_FORWARD, 16)
 
 
 def find_mig_subsystems():
