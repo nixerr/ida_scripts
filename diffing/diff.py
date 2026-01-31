@@ -70,7 +70,7 @@ class IDABinaryType(IntEnum):
 class IDARunner(object):
     @staticmethod
     def execute(type: IDABinaryType,  binary: str = None, idbdir: str = None, script: str = None, args: str = None, logfile: str = None, verbose: bool = False):
-        command = ["idat64", "-A", f"-T{str(type)}"]
+        command = ["idat", "-A", f"-T{str(type)}"]
 
         if script and args:
             command.append(f"-S{script} {' '.join(args)}")

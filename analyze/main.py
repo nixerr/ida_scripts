@@ -10,6 +10,7 @@ class IDABinaryType(IntEnum):
     KERNEL      = 1
     KEXT_FAT    = 2
     KEXT        = 3
+    DYLD        = 4
 
     def __str__(self):
         if self.value == self.KERNELCACHE:
@@ -18,13 +19,15 @@ class IDABinaryType(IntEnum):
             return "Mach-O"
         elif self.value == IDABinaryType.KEXT_FAT:
             return "Fat Mach-O File, 2"
+        elif self.value == IDABinaryType.DYLD:
+            return "Apple DYLD cache for arm64e (select module(s))"
         print("WTF")
         sys.exit(0)
 
 class IDARunner(object):
     @staticmethod
     def execute(type: IDABinaryType,  binary: str = None, idbdir: str = None, script: str = None, args: str = None, logfile: str = None, verbose: bool = False):
-        command = ["idat64", "-A", f"-T{str(type)}"]
+        command = ["idat", "-A", f"-T{str(type)}"]
 
         if script and args:
             command.append(f"-S{script} {' '.join(args)}")
