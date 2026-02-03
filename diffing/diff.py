@@ -47,7 +47,7 @@ def arguments():
     parser.add_argument('-l', '--list', action="store_true",
         help = 'List all available KDK versions')
 
-    return parser.parse_args()
+    return parser.parse_args(args=None if sys.argv[1:] else ['--help'])
 
 
 class IDABinaryType(IntEnum):
