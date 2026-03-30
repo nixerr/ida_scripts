@@ -550,7 +550,7 @@ def arguments():
         help = 'List all available KDK versions')
     parser.add_argument('-v', '--version', required=True,
         help = 'Choose version')
-    parser.add_argument('-s', '--struct', required=True,
+    parser.add_argument('-s', '--struct', required=False,
         help = 'Choose struct name')
     parser.add_argument('-r', '--recursive', action="store_true", default=False,
         help = 'Print subtypes')
@@ -587,6 +587,40 @@ def dump_struct_layout(binary_path, ty_name, O):
     _showStructPacking(ctx, sym, 0)
 
 
+def list_types_from_module(binary_path):
+    debugger = lldb.SBDebugger.Create()
+    debugger.SetAsync(False)
+
+    target = debugger.CreateTarget(binary_path)
+    if not target.IsValid():
+        raise RuntimeError("Failed to create target")
+
+    WANTED = {lldb.eTypeClassStruct, lldb.eTypeClassUnion, lldb.eTypeClassClass, lldb.eTypeClassEnumeration}
+
+    seen = set()
+    for i in range(target.GetNumModules()):
+        module = target.GetModuleAtIndex(i)
+        type_list = module.GetTypes(
+            lldb.eTypeClassStruct | lldb.eTypeClassUnion | lldb.eTypeClassClass | lldb.eTypeClassEnumeration
+        )
+        for j in range(type_list.GetSize()):
+            t = type_list.GetTypeAtIndex(j)
+            name = t.GetName()
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            tc = t.GetTypeClass()
+            kind = {
+                lldb.eTypeClassStruct: "struct",
+                lldb.eTypeClassUnion:  "union",
+                lldb.eTypeClassClass:  "class",
+                lldb.eTypeClassEnumeration : "enum",
+            }.get(tc, "?")
+            print(f"{kind:<8} {t.GetByteSize():#8x}  {name}")
+
+    print(f"\n{len(seen)} types total")
+
+
 def main():
     args = arguments()
     storage = KDKStorage(Path(KDK_PATH))
@@ -604,7 +638,10 @@ def main():
         print(f'[-] Version {args.version} not found!')
         return
 
-    dump_struct_layout(kernel.binary, args.struct, CommandOutput(''))
+    if args.struct is not None:
+        dump_struct_layout(kernel.binary, args.struct, CommandOutput(''))
+    else:
+        list_types_from_module(kernel.binary)
 
 
 if __name__ == '__main__':
