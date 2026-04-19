@@ -255,7 +255,7 @@ def find_mig_subsystems():
     }
     mig_e_addr = idc.get_name_ea_simple("mig_e")
     subsystems_addr = ida_bytes.get_qword(mig_e_addr)
-    while subsystems_addr & 0xfffffff000000000 ==  0xfffffff000000000:
+    while subsystems_addr & 0xfffffff000000000 == 0xfffffff000000000:
         num_start = ida_bytes.get_dword(subsystems_addr+8)
         num_end = ida_bytes.get_dword(subsystems_addr+12)
         subsystems_name = ''
