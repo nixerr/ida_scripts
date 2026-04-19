@@ -13,8 +13,28 @@ import string
 import lldb
 import re
 
-
 KDK_PATH = "/Users/vsh/Research/platform/kdk"
+
+def arguments():
+    parser = argparse.ArgumentParser(
+        prog = 'diff',
+        description = 'Generate binexport files for specific driver and version'
+    )
+
+    parser.add_argument('-k', '--kernel', required=True,
+        help = 'Choose kernel')
+    parser.add_argument('-l', '--list', action="store_true",
+        help = 'List all available KDK versions')
+    parser.add_argument('-f', '--find', action="store_true", default=False,
+        help = 'Find structures with type')
+    parser.add_argument('-v', '--version', required=True,
+        help = 'Choose version')
+    parser.add_argument('-s', '--struct', required=False,
+        help = 'Choose struct name')
+    # parser.add_argument('-r', '--recursive', action="store_true", default=False,
+    #     help = 'Print subtypes')
+
+    return parser.parse_args(args=None if sys.argv[1:] else ['--help'])
 
 
 class VT(object):
@@ -538,24 +558,7 @@ class Kernel(KDKElement):
         self.binary = os.path.join(self.kdk_path, Kernel.element_path, self.name)
 
 
-def arguments():
-    parser = argparse.ArgumentParser(
-        prog = 'diff',
-        description = 'Generate binexport files for specific driver and version'
-    )
 
-    parser.add_argument('-k', '--kernel', required=True,
-        help = 'Choose kernel')
-    parser.add_argument('-l', '--list', action="store_true",
-        help = 'List all available KDK versions')
-    parser.add_argument('-v', '--version', required=True,
-        help = 'Choose version')
-    parser.add_argument('-s', '--struct', required=False,
-        help = 'Choose struct name')
-    parser.add_argument('-r', '--recursive', action="store_true", default=False,
-        help = 'Print subtypes')
-
-    return parser.parse_args(args=None if sys.argv[1:] else ['--help'])
 
 
 _UnionStructClass = [ lldb.eTypeClassStruct, lldb.eTypeClassClass, lldb.eTypeClassUnion ]
@@ -563,6 +566,8 @@ _UnionStructClass = [ lldb.eTypeClassStruct, lldb.eTypeClassClass, lldb.eTypeCla
 def dump_struct_layout(binary_path, ty_name, O):
     debugger = lldb.SBDebugger.Create()
     debugger.SetAsync(False)
+
+    debugger.HandleCommand("settings set target.load-script-from-symbol-file false")
 
     target = debugger.CreateTarget(binary_path)
     if not target.IsValid():
@@ -582,7 +587,7 @@ def dump_struct_layout(binary_path, ty_name, O):
     if sym.GetTypeClass() not in _UnionStructClass:
         return O.error("{0} is not a structure/union/class type", ty_name)
 
-    ctx = (O, False)
+    ctx = (O, True)
 
     _showStructPacking(ctx, sym, 0)
 
@@ -590,6 +595,8 @@ def dump_struct_layout(binary_path, ty_name, O):
 def list_types_from_module(binary_path):
     debugger = lldb.SBDebugger.Create()
     debugger.SetAsync(False)
+
+    debugger.HandleCommand("settings set target.load-script-from-symbol-file false")
 
     target = debugger.CreateTarget(binary_path)
     if not target.IsValid():
@@ -621,6 +628,103 @@ def list_types_from_module(binary_path):
     print(f"\n{len(seen)} types total")
 
 
+def find_structs_containing_type(binary_path, needle_type_name, recursive=False):
+    debugger = lldb.SBDebugger.Create()
+    debugger.SetAsync(False)
+
+    debugger.HandleCommand("settings set target.load-script-from-symbol-file false")
+
+    target = debugger.CreateTarget(binary_path)
+    if not target.IsValid():
+        raise RuntimeError("Failed to create target")
+
+    COMPOSITE = {lldb.eTypeClassStruct, lldb.eTypeClassUnion, lldb.eTypeClassClass}
+    MASK = lldb.eTypeClassStruct | lldb.eTypeClassUnion | lldb.eTypeClassClass
+
+    def canonical_name(t: lldb.SBType) -> str:
+        """Strip pointer/ref/typedef layers to get the underlying type name."""
+        t = t.GetCanonicalType()
+        while t.IsPointerType() or t.IsReferenceType():
+            t = t.GetPointeeType().GetCanonicalType()
+        return t.GetName() or ""
+
+    def field_matches(field_type: lldb.SBType) -> bool:
+        return canonical_name(field_type) == needle_type_name
+
+    def contains_needle(sbtype: lldb.SBType, visited: set) -> bool:
+        """
+        Check if sbtype has a field whose (dereferenced) type matches needle.
+        If recursive=True, also descend into nested composite fields.
+        """
+        type_name = sbtype.GetName()
+        if type_name in visited:
+            return False
+        visited.add(type_name)
+
+        for i in range(sbtype.GetNumberOfFields()):
+            field = sbtype.GetFieldAtIndex(i)
+            ft = field.GetType().GetCanonicalType()
+
+            # Direct match (value, pointer, or reference to needle)
+            if field_matches(ft):
+                return True
+
+            # Recurse into nested composite types if requested
+            if recursive and ft.GetTypeClass() in COMPOSITE:
+                if contains_needle(ft, visited):
+                    return True
+
+        return False
+
+    # Collect all composite types from the module
+    seen = set()
+    matches = []
+
+    for mi in range(target.GetNumModules()):
+        module = target.GetModuleAtIndex(mi)
+        type_list = module.GetTypes(MASK)
+
+        for ti in range(type_list.GetSize()):
+            t = type_list.GetTypeAtIndex(ti)
+            name = t.GetName()
+            if not name or name in seen:
+                continue
+            seen.add(name)
+
+            if contains_needle(t, set()):
+                kind = {
+                    lldb.eTypeClassStruct: "struct",
+                    lldb.eTypeClassUnion:  "union",
+                    lldb.eTypeClassClass:  "class",
+                }.get(t.GetTypeClass(), "?")
+                matches.append((kind, name, t.GetByteSize(), t))
+
+    return matches
+
+
+def print_matches(matches, needle_type_name, show_fields=True):
+    print(f"Structures containing '{needle_type_name}':\n")
+    for kind, name, size, sbtype in sorted(matches, key=lambda x: x[1]):
+        print(f"  {kind:<8} {size:#8x}  {name}")
+
+        if show_fields:
+            # Print only the fields that match (or wrap) the needle
+            for i in range(sbtype.GetNumberOfFields()):
+                field = sbtype.GetFieldAtIndex(i)
+                ft    = field.GetType().GetCanonicalType()
+                base  = ft
+                ptr   = False
+                while base.IsPointerType() or base.IsReferenceType():
+                    base = base.GetPointeeType().GetCanonicalType()
+                    ptr  = True
+                if base.GetName() == needle_type_name:
+                    offset = field.GetOffsetInBytes()
+                    print(f"    +{offset:#06x}  {field.GetType().GetName():<40} {field.GetName()}")
+        print("")
+
+    print(f"\n{len(matches)} match(es) found")
+
+
 def main():
     args = arguments()
     storage = KDKStorage(Path(KDK_PATH))
@@ -638,7 +742,10 @@ def main():
         print(f'[-] Version {args.version} not found!')
         return
 
-    if args.struct is not None:
+    if args.struct and args.find:
+        matches = find_structs_containing_type(kernel.binary, args.struct)
+        print_matches(matches, args.struct)
+    elif args.struct is not None:
         dump_struct_layout(kernel.binary, args.struct, CommandOutput(''))
     else:
         list_types_from_module(kernel.binary)
