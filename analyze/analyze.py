@@ -37,6 +37,7 @@ def run_stage(stage, storage):
         script.run()
 
 def main(file):
+    print(f'python version : {sys.version}')
     outs = parse_script_list(file)
     run_stage('before', outs)
     idc.auto_wait()

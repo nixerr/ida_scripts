@@ -1,2 +1,3 @@
-before pre_analysis D:\\work\\apple\\tools\\ida_plugins\\ida_scripts\\kernelcache\\pre_analysis.py
-after post_analysis D:\\work\\apple\\tools\\ida_plugins\\ida_scripts\\kernelcache\\post_analysis.py
+before pre_analysis /Users/vsh/Research/tools/idaplugins/nixerr/ida_scripts/kernelcache/pre_analysis.py
+after post_analysis /Users/vsh/Research/tools/idaplugins/nixerr/ida_scripts/kernelcache/post_analysis.py
+after post_analysis /Users/vsh/Research/tools/idaplugins/nixerr/ida_scripts/kernelcache/kernelcache.py
