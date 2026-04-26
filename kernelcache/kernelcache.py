@@ -280,9 +280,48 @@ known_functions = {
         0x30 : 'serialize',
         0x68 : 'alloc',
     },
+    'OSObject' : {
+        0x28 : 'release',
+        0x48 : 'refcount',
+        0x58 : 'taggedRelease',
+        0x70 : 'free',
+    },
     'IOUserClient' : {
-        0x5D0 : 'externalMethod',
-    }
+        0x540 : 'externalMethod',
+        0x550 : 'initWithTask',
+        0x560 : 'clientClose',
+        0x568 : 'clientDied',
+        0x578 : 'registerNotificationPort',
+        0x590 : 'clientMemoryForType',
+        0x5B0 : 'getTargetAndMethodForIndex',
+        0x5C8 : 'getTargetAndTrapForIndex',
+    },
+    'IOUserClient2022' : {
+        0x5D0 : 'externalMethod2022',
+    },
+    'IORegistryEntry' : {
+        0xA8 : 'init',
+    },
+    'IOService' : {
+        0x278 : 'systemWillShutdown',
+        0x2A8 : 'probe',
+        0x2B0 : 'start',
+        0x2B8 : 'stop',
+        0x2F0 : 'terminate',
+        0x460 : 'newUserClient',
+        0x468 : 'newUserClient',
+        0x4D8 : 'setPowerState',
+    },
+    'IOMemoryMap' : {
+        0x78 : 'getVirtualAddress',
+        0x88 : 'getLength',
+    },
+    'IOMemoryDescriptor' : {
+        0xD8 : 'prepare',
+        0xE0 : 'complete',
+        0xE8 : 'map',
+        0x100 : 'makeMapping',
+    },
 }
 
 
@@ -311,6 +350,9 @@ def find_vtables_via_FFFC(init_calls):
                         vtable = func_xref.frm - 0x48
                         call.vtable = vtable
                         revealed_vtables.append(vtable)
+
+
+
 
 
 class Hierarchy:
@@ -507,10 +549,10 @@ class Hierarchy:
                 if self.vtable(class_name) is not None:
                     tid = idc.get_struc_id(self.vtable(class_name).sanitaize_name())
                     if tid == idc.BADADDR:
-                        create_cpp_struct(self.get_class_declaration(class_name))
+                        create_struct(self.get_class_declaration(class_name))
 
 
-def create_cpp_struct(decl: str):
+def create_struct(decl: str):
     """
     Parse a C++ struct declaration into the IDB type system.
     Supports __cppobj, inheritance, and nested types.
@@ -726,6 +768,110 @@ class Vtable:
         return False
 
 
+def collect_kalloc_types(seen: Array) -> Dict:
+    kalloc_types = {}
+    for segaddr in idautils.Segments():
+        if '__kalloc_type' not in idc.get_segm_name(segaddr):
+            continue
+
+        seg = ida_segment.getseg(segaddr)
+        curr_addr = seg.start_ea
+        seg_end = seg.end_ea
+        while curr_addr < seg_end:
+            if ida_bytes.get_qword(curr_addr + 0x10) != 0:
+                next_kt = KallocType.parse(curr_addr)
+                if next_kt.name not in kalloc_types.keys() and next_kt.name not in seen and next_kt.sanitaized_name not in KallocType.skip_names:
+                    kalloc_types[next_kt.name] = next_kt
+            curr_addr += 0x40
+
+    return kalloc_types
+
+
+class KallocType:
+    symbol_replacer = [
+        ['*', '_'],
+        ['(', '_'],
+        [')', '_'],
+        ['&', '_'],
+        [' ', '_'],
+        ['<', '_'],
+        ['>', '_'],
+        ['-', '_'],
+        [':', '_'],
+        ['.', '_'],
+    ]
+
+    skip_names = [
+        'T',
+        'tExpansionData',
+    ]
+
+    def __init__(self, address, driver_name, name, flag, size) -> None:
+        self.address = address
+        self.driver_name = driver_name
+        self.name = name
+        self.flag = flag
+        self.size = size
+        self.sanitaized_name = self.sanitaize_name()
+
+    def sanitaize_name(self):
+        name = self.name
+        for r in KallocType.symbol_replacer:
+            name = name.replace(r[0], r[1])
+        return name.strip('_')
+
+    def get_class_declaration(self):
+        s = None
+        start = 0
+        end = self.size
+
+        is_packed = end % 8
+        s =  f'struct {'__attribute__((packed))' if is_packed else ''} {self.sanitaized_name} {chr(0x7b)}\n'
+
+        while start < end:
+            still = end-start
+            if still == 1:
+                s += f'    __int8 field_{start:x};\n'
+                start += 2
+            elif still == 2:
+                s += f'    __int16 field_{start:x};\n'
+                start += 2
+            elif 2 < still <= 8:
+                s += f'    uint32_t field_{start:x};\n'
+                start += 4
+            else:
+                s += f'    uint64_t field_{start:x};\n'
+                start += 8
+
+        s += '};\n'
+        return s
+
+    def create_structure(self):
+        tid = idc.get_struc_id(self.sanitaized_name)
+        if tid == idc.BADADDR:
+            create_struct(self.get_class_declaration())
+
+    @staticmethod
+    def parse(address) -> KallocType:
+        segname = idc.get_segm_name(address)
+        driver_name = segname.split(':')[0]
+        name_offset = 0x10 + address
+        typ_offset  = 0x20 + address
+        flag_offset = 0x28 + address
+        size_offset = 0x2c + address
+        name = ida_bytes.get_strlit_contents(ida_bytes.get_qword(name_offset), idc.BADADDR, ida_nalt.STRTYPE_C).decode()
+        name = name.split('site.')[1]
+        # typ = ''
+        # if ida_bytes.get_byte(get_qword(typ_offset)) != 0x0:
+        #     typ = ida_bytes.get_strlit_contents(ida_bytes.get_qword(typ_offset), idc.BADADDR, ida_nalt.STRTYPE_C).decode()
+        flag = ida_bytes.get_dword(flag_offset)
+        size = ida_bytes.get_dword(size_offset)
+        # if 'struct' not in name and 'typeof' not in name:
+        # if '>' in name:
+        #     print(f'{addr:016x} {name:60s} : 0x{flag:08x} : 0x{size:08x}')
+        return KallocType(address, driver_name, name, flag, size)
+
+
 def save_metaclass_info(init_calls: list[OSMetaClassConstructorCall], filename):
     with open(filename, 'w') as fd:
         for call in init_calls:
@@ -743,10 +889,16 @@ def load_metaclass_info(filename):
 
 
 hier = None
+kts = None
 
 
 def run():
+    os.chdir(os.path.dirname(idc.get_idb_path()))
+    main()
+
+def main():
     global hier
+    global kts
 
     ida_typeinf.del_til('xnu_7195_arm64')
 
@@ -766,14 +918,15 @@ def run():
     hier.rename_functions()
     hier.update_vtables()
     hier.create_structures()
-    # hier.propagate_type_in_functions()
-
 
     for cl in hier.hierarchy.keys():
         if hier.hierarchy[cl]['vtable'] is None:
             print(f'[!] {cl:20s}')
 
-
+    kts = collect_kalloc_types(hier.hierarchy.keys())
+    for k in kts.keys():
+        kts[k].create_structure()
+        # print(f'{kts[k].address:x} {kts[k].sanitaized_name:60s} {k}')
 
 if __name__ == '__main__':
-    run()
+    main()
