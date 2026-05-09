@@ -4,6 +4,15 @@ import ida_ua
 import ida_name
 import idaapi
 import ida_bytes
+import idautils
+import idc
+
+def make_kernel_const_segments_rw():
+    for segment in idautils.Segments():
+        if 'com.apple.kernel:__const' in idc.get_segm_name(segment):
+            seg = ida_segment.getseg(segment)
+            seg.perm = ida_segment.SEGPERM_READ | ida_segment.SEGPERM_WRITE
+            seg.update()
 
 def find_panic_trap_to_debugger():
     base_ea     = idaapi.get_imagebase()
@@ -27,6 +36,7 @@ def find_panic_trap_to_debugger():
     print("[i] panic_trap_to_debugger: 0x{0:x}".format(func_start))
 
 def run():
+    make_kernel_const_segments_rw()
     find_panic_trap_to_debugger()
 
 if __name__ == '__main__':

@@ -30,7 +30,6 @@ class OSMetaClassConstructorCall:
         self.size        = size
         self.metaclass_vtable = None
         self.vtable      = None
-        # self.vtable2     = None
 
     def get_name(self):
         return self.name
@@ -352,9 +351,6 @@ def find_vtables_via_FFFC(init_calls):
                         revealed_vtables.append(vtable)
 
 
-
-
-
 class Hierarchy:
     def __init__(self, init_calls) -> None:
         self.max_depth = 0
@@ -514,7 +510,6 @@ class Hierarchy:
         start = 0
         end = self.get_size(class_name)
 
-        # print(class_name)
         if class_name in ['OSObject', 'OSMetaClass']:
             s =  f'struct __cppobj {class_name} {chr(0x7b)}\n'
 
@@ -522,11 +517,8 @@ class Hierarchy:
             start = 8
         else:
             parent = self.get_parent(class_name)
-            # print(parent)
-            while self.vtable(parent) is None:
-                parent = self.get_parent(parent)
 
-            s = f'struct __cppobj {self.vtable(class_name).sanitaize_name()} : {self.vtable(parent).sanitaize_name()} {chr(0x7b)}\n'
+            s = f'struct __cppobj {NameSanitizer.sanitize_name(class_name)} : {NameSanitizer.sanitize_name(parent)} {chr(0x7b)}\n'
             start = self.get_size(self.get_parent(class_name))
 
         while start < end:
@@ -546,10 +538,9 @@ class Hierarchy:
 
         for i in range(self.max_depth+1):
             for class_name in structures[i]:
-                if self.vtable(class_name) is not None:
-                    tid = idc.get_struc_id(self.vtable(class_name).sanitaize_name())
-                    if tid == idc.BADADDR:
-                        create_struct(self.get_class_declaration(class_name))
+                tid = idc.get_struc_id(NameSanitizer.sanitize_name(class_name))
+                if tid == idc.BADADDR:
+                    create_struct(self.get_class_declaration(class_name))
 
 
 def create_struct(decl: str):
@@ -628,9 +619,6 @@ class VtableFunction:
             return self.name
 
         type_name = self.vtable.sanitaize_name()
-        # prev_name = ida_name.get_name(self.function_address)
-        # if not prev_name.startswith('j_') and not prev_name.startswith(type_name) and not prev_name.startswith('sub_'):
-        #     pass
 
         method = self.find_method_name(self.vtable.hierarchy)
         self.name = f'{type_name}__{method}_0x{self.offset:X}_0x{self.paccode:X}'
@@ -650,7 +638,7 @@ class VtableFunction:
         ida_hexrays.decompile(ida_funcs.get_func(self.function_address))
         idc.auto_wait()
         proto = idc.get_type(self.function_address)
-        if proto is not None:
+        if proto is not None and '()' not in proto:
             new_proto = proto[0:proto.find('(')+1] + first_arg_type + proto[proto.find(',')]
             idc.SetType(self.function_address, new_proto)
 
@@ -673,6 +661,28 @@ class VtableFunction:
     def is_func_ptr(address):
         funcaddr = VtableFunction.funcaddr(address)
         return is_code(funcaddr)
+
+
+class NameSanitizer:
+    symbol_replacer = [
+        ['*', '_'],
+        ['(', '_'],
+        [')', '_'],
+        ['&', '_'],
+        [' ', '_'],
+        ['<', '_'],
+        ['>', '_'],
+        ['-', '_'],
+        [':', '_'],
+        ['.', '_'],
+    ]
+
+    @staticmethod
+    def sanitize_name(name):
+        sanitized_name = name
+        for r in NameSanitizer.symbol_replacer:
+            sanitized_name = sanitized_name.replace(r[0], r[1])
+        return sanitized_name.strip('_')
 
 
 class Vtable:
@@ -706,7 +716,7 @@ class Vtable:
         return f'{self.sanitaize_name()}_vtbl'
 
     def sanitaize_name(self):
-        return self.name.replace("<","_").replace(">","_").replace("*","_").replace(':','_').strip('_')
+        return NameSanitizer.sanitize_name(self.name)
 
     def apply_name(self):
         idc.set_name(self.address, f'vtable_for_{self.sanitaize_name()}')
@@ -788,19 +798,6 @@ def collect_kalloc_types(seen: Array) -> Dict:
 
 
 class KallocType:
-    symbol_replacer = [
-        ['*', '_'],
-        ['(', '_'],
-        [')', '_'],
-        ['&', '_'],
-        [' ', '_'],
-        ['<', '_'],
-        ['>', '_'],
-        ['-', '_'],
-        [':', '_'],
-        ['.', '_'],
-    ]
-
     skip_names = [
         'T',
         'tExpansionData',
@@ -815,10 +812,7 @@ class KallocType:
         self.sanitaized_name = self.sanitaize_name()
 
     def sanitaize_name(self):
-        name = self.name
-        for r in KallocType.symbol_replacer:
-            name = name.replace(r[0], r[1])
-        return name.strip('_')
+        return NameSanitizer.sanitize_name(self.name)
 
     def get_class_declaration(self):
         s = None
