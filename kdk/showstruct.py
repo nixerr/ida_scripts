@@ -21,13 +21,13 @@ def arguments():
         description = 'Generate binexport files for specific driver and version'
     )
 
-    parser.add_argument('-k', '--kernel', required=True,
+    parser.add_argument('-k', '--kernel', required="--list" not in sys.argv and "-l" not in sys.argv,
         help = 'Choose kernel')
     parser.add_argument('-l', '--list', action="store_true",
         help = 'List all available KDK versions')
     parser.add_argument('-f', '--find', action="store_true", default=False,
         help = 'Find structures with type')
-    parser.add_argument('-v', '--version', required=True,
+    parser.add_argument('-v', '--version', required="--list" not in sys.argv and "-l" not in sys.argv,
         help = 'Choose version')
     parser.add_argument('-s', '--struct', required=False,
         help = 'Choose struct name')
@@ -300,158 +300,6 @@ class CommandOutput(object):
                 self.target_cmd_options[o] = a
 
 
-def _showStructPacking(ctx, symbol, begin_offset=0, symsize=0, typedef=None, outerSize=0, memberName=None):
-    """ Recursively parse the field members of structure.
-        
-        params :
-            ctx - context containing configuration settings and the output formatter (standard.py) symbol (lldb.SBType) reference to symbol in binary
-        returns:
-            string containing lines of output.
-    """
-
-    O = ctx[0]
-    format_offset = _get_offset_formatter(ctx, "{:#06x},[{:#6x}]", "{:04d},[{:4d}]")
-    format_num = _get_num_formatter(ctx, "{:#04x}", "{:2d}")
-
-    ctype = "unknown type"
-    is_union = False
-    is_class = False
-    union_size = None
-    sym_size = symbol.GetByteSize()
-
-    if symbol.GetTypeClass() == lldb.eTypeClassUnion:
-        ctype = "union"
-        is_union = True
-        union_size = sym_size
-    if symbol.GetTypeClass() == lldb.eTypeClassStruct:
-        ctype = "struct"
-    if symbol.GetTypeClass() == lldb.eTypeClassClass:
-        ctype = "class"
-        is_class = True
-
-    outstr = O._indent
-    if not outerSize or outerSize == sym_size:
-        outstr += format_offset(begin_offset, sym_size)
-    elif outerSize < sym_size: # happens with c++ inheritance
-        outstr += format_offset(begin_offset, outerSize)
-    else:
-        outstr += O.format("{:s}{VT.DarkRed}{{{:s}}}{VT.Default}",
-                format_offset(begin_offset, sym_size),
-                format_num(outerSize - sym_size))
-
-    if typedef:
-        outstr += O.format(" {0}", typedef)
-    if symbol.IsAnonymousType():
-        outstr += O.format(" ({VT.DarkMagenta}anonymous {0}{VT.Default})", ctype)
-    else:
-        outstr += O.format(" ({VT.DarkMagenta}{0} {1}{VT.Default})", ctype, symbol.GetName())
-    if memberName:
-        outstr += O.format(" {0} {{", memberName)
-    else:
-        outstr += ") {"
-
-    print(outstr)
-
-    with O.indent():
-        _previous_size = 0
-        _packed_bit_offset = 0
-        _nfields = symbol.GetNumberOfFields()
-
-        if is_class:
-            _next_offset_in_bits = 0
-            _nclasses = symbol.GetNumberOfDirectBaseClasses()
-
-            for i in range(_nclasses):
-                member = symbol.GetDirectBaseClassAtIndex(i)
-                if i < _nclasses - 1:
-                    m_size_bits = symbol.GetDirectBaseClassAtIndex(i + 1).GetOffsetInBits()
-                elif _nfields:
-                    m_size_bits = symbol.GetFieldAtIndex(0).GetOffsetInBits()
-                else:
-                    m_size_bits = symbol.GetByteSize() * 8
-
-                m_offset = member.GetOffsetInBytes() + begin_offset
-                m_type = member.GetType()
-                m_name = member.GetName()
-                m_size = m_size_bits // 8
-
-                _previous_size = m_size
-                _packed_bit_offset = member.GetOffsetInBits() + m_size_bits
-
-                _showStructPacking(ctx, m_type, m_offset, str(m_type), outerSize=m_size, memberName=m_name)
-
-        for i in range(_nfields):
-            member = symbol.GetFieldAtIndex(i)
-            m_offset = member.GetOffsetInBytes() + begin_offset
-            m_offset_bits = member.GetOffsetInBits()
-
-            m_type = member.GetType()
-            m_name = member.GetName()
-            m_size = m_type.GetByteSize()
-
-            if member.IsBitfield():
-                m_is_bitfield = True
-                m_size_bits = member.GetBitfieldSizeInBits()
-            else:
-                m_is_bitfield = False
-                m_size_bits = m_size * 8
-
-            if not is_union and _packed_bit_offset < m_offset_bits:
-                m_previous_offset = begin_offset + (_packed_bit_offset // 8)
-                m_hole_bits = m_offset_bits - _packed_bit_offset
-                if _packed_bit_offset % 8 == 0:
-                    print(O.format("{:s}{:s} ({VT.DarkRed}*** padding ***{VT.Default})", O._indent,
-                           format_offset(m_previous_offset, (m_hole_bits // 8))))
-                else:
-                    print(O.format("{:s}{:s} ({VT.Brown}*** padding : {:s} ***{VT.Default})", O._indent,
-                            format_offset(m_previous_offset, _previous_size),
-                            format_num(m_hole_bits)))
-
-            _previous_size = m_size
-            _packed_bit_offset = m_offset_bits + m_size_bits
-
-            _type_class = m_type.GetTypeClass()
-            _canonical_type = m_type.GetCanonicalType()
-            _canonical_type_class = m_type.GetCanonicalType().GetTypeClass()
-
-            if _type_class == lldb.eTypeClassTypedef and _canonical_type_class in _UnionStructClass:
-                _showStructPacking(ctx, _canonical_type, m_offset, str(m_type), outerSize=union_size, memberName=m_name)
-            elif _type_class in _UnionStructClass:
-                _showStructPacking(ctx, m_type, m_offset, outerSize=union_size, memberName=m_name)
-            else:
-                outstr = O._indent
-                outstr += format_offset(m_offset, m_size)
-                if is_union and union_size != (m_size_bits // 8):
-                    outstr += O.format("{VT.DarkRed}{{{:s}}}{VT.Default}",
-                            format_num(union_size - (m_size_bits // 8)))
-                if m_is_bitfield:
-                    outstr += O.format(" ({VT.DarkGreen}{:s} : {:s}{VT.Default}) {:s}",
-                            m_type.GetName(),
-                            format_num(m_size_bits),
-                            m_name)
-                else:
-                    outstr += O.format(" ({VT.DarkGreen}{:s}{VT.Default}) {:s}",
-                            m_type.GetName(), m_name)
-                print(outstr)
-
-        referenceSize = sym_size
-        if outerSize:
-            referenceSize = min(outerSize, sym_size)
-
-        if not is_union and _packed_bit_offset < referenceSize * 8:
-            m_previous_offset = begin_offset + (_packed_bit_offset // 8)
-            m_hole_bits = referenceSize * 8 - _packed_bit_offset
-            if _packed_bit_offset % 8 == 0:
-                print(O.format("{:s}{:s} ({VT.DarkRed}*** padding ***{VT.Default})", O._indent,
-                        format_offset(m_previous_offset, m_hole_bits // 8)))
-            else:
-                print(O.format("{:s}{:s} ({VT.Brown}padding : {:s}{VT.Default})\n", O._indent,
-                        format_offset(m_previous_offset, _previous_size),
-                        format_num(m_hole_bits)))
-
-    print(f"{O._indent}}}")
-
-
 class KDK():
     def __init__(self, path: Path):
         self.path: Path = path.resolve()
@@ -558,149 +406,7 @@ class Kernel(KDKElement):
         self.binary = os.path.join(self.kdk_path, Kernel.element_path, self.name)
 
 
-
-
-
 _UnionStructClass = [ lldb.eTypeClassStruct, lldb.eTypeClassClass, lldb.eTypeClassUnion ]
-
-def dump_struct_layout(binary_path, ty_name, O):
-    debugger = lldb.SBDebugger.Create()
-    debugger.SetAsync(False)
-
-    debugger.HandleCommand("settings set target.load-script-from-symbol-file false")
-
-    target = debugger.CreateTarget(binary_path)
-    if not target.IsValid():
-        print("Failed to create target")
-        return
-
-    type_list = target.FindTypes(ty_name)
-    if type_list.GetSize() == 0:
-        print(f"Type '{ty_name}' not found")
-        return
-
-    sym = type_list.GetTypeAtIndex(0)
- 
-    if sym.GetTypeClass() == lldb.eTypeClassTypedef:
-        sym = sym.GetCanonicalType()
-
-    if sym.GetTypeClass() not in _UnionStructClass:
-        return O.error("{0} is not a structure/union/class type", ty_name)
-
-    ctx = (O, True)
-
-    _showStructPacking(ctx, sym, 0)
-
-
-def list_types_from_module(binary_path):
-    debugger = lldb.SBDebugger.Create()
-    debugger.SetAsync(False)
-
-    debugger.HandleCommand("settings set target.load-script-from-symbol-file false")
-
-    target = debugger.CreateTarget(binary_path)
-    if not target.IsValid():
-        raise RuntimeError("Failed to create target")
-
-    WANTED = {lldb.eTypeClassStruct, lldb.eTypeClassUnion, lldb.eTypeClassClass, lldb.eTypeClassEnumeration}
-
-    seen = set()
-    for i in range(target.GetNumModules()):
-        module = target.GetModuleAtIndex(i)
-        type_list = module.GetTypes(
-            lldb.eTypeClassStruct | lldb.eTypeClassUnion | lldb.eTypeClassClass | lldb.eTypeClassEnumeration
-        )
-        for j in range(type_list.GetSize()):
-            t = type_list.GetTypeAtIndex(j)
-            name = t.GetName()
-            if not name or name in seen:
-                continue
-            seen.add(name)
-            tc = t.GetTypeClass()
-            kind = {
-                lldb.eTypeClassStruct: "struct",
-                lldb.eTypeClassUnion:  "union",
-                lldb.eTypeClassClass:  "class",
-                lldb.eTypeClassEnumeration : "enum",
-            }.get(tc, "?")
-            print(f"{kind:<8} {t.GetByteSize():#8x}  {name}")
-
-    print(f"\n{len(seen)} types total")
-
-
-def find_structs_containing_type(binary_path, needle_type_name, recursive=False):
-    debugger = lldb.SBDebugger.Create()
-    debugger.SetAsync(False)
-
-    debugger.HandleCommand("settings set target.load-script-from-symbol-file false")
-
-    target = debugger.CreateTarget(binary_path)
-    if not target.IsValid():
-        raise RuntimeError("Failed to create target")
-
-    COMPOSITE = {lldb.eTypeClassStruct, lldb.eTypeClassUnion, lldb.eTypeClassClass}
-    MASK = lldb.eTypeClassStruct | lldb.eTypeClassUnion | lldb.eTypeClassClass
-
-    def canonical_name(t: lldb.SBType) -> str:
-        """Strip pointer/ref/typedef layers to get the underlying type name."""
-        t = t.GetCanonicalType()
-        while t.IsPointerType() or t.IsReferenceType():
-            t = t.GetPointeeType().GetCanonicalType()
-        return t.GetName() or ""
-
-    def field_matches(field_type: lldb.SBType) -> bool:
-        return canonical_name(field_type) == needle_type_name
-
-    def contains_needle(sbtype: lldb.SBType, visited: set) -> bool:
-        """
-        Check if sbtype has a field whose (dereferenced) type matches needle.
-        If recursive=True, also descend into nested composite fields.
-        """
-        type_name = sbtype.GetName()
-        if type_name in visited:
-            return False
-        visited.add(type_name)
-
-        for i in range(sbtype.GetNumberOfFields()):
-            field = sbtype.GetFieldAtIndex(i)
-            ft = field.GetType().GetCanonicalType()
-
-            # Direct match (value, pointer, or reference to needle)
-            if field_matches(ft):
-                return True
-
-            # Recurse into nested composite types if requested
-            if recursive and ft.GetTypeClass() in COMPOSITE:
-                if contains_needle(ft, visited):
-                    return True
-
-        return False
-
-    # Collect all composite types from the module
-    seen = set()
-    matches = []
-
-    for mi in range(target.GetNumModules()):
-        module = target.GetModuleAtIndex(mi)
-        type_list = module.GetTypes(MASK)
-
-        for ti in range(type_list.GetSize()):
-            t = type_list.GetTypeAtIndex(ti)
-            name = t.GetName()
-            if not name or name in seen:
-                continue
-            seen.add(name)
-
-            if contains_needle(t, set()):
-                kind = {
-                    lldb.eTypeClassStruct: "struct",
-                    lldb.eTypeClassUnion:  "union",
-                    lldb.eTypeClassClass:  "class",
-                }.get(t.GetTypeClass(), "?")
-                matches.append((kind, name, t.GetByteSize(), t))
-
-    return matches
-
 
 def print_matches(matches, needle_type_name, show_fields=True):
     print(f"Structures containing '{needle_type_name}':\n")
@@ -725,6 +431,305 @@ def print_matches(matches, needle_type_name, show_fields=True):
     print(f"\n{len(matches)} match(es) found")
 
 
+def print_types(types):
+    # for kind, name, size in sorted(types, key=lambda x: x[1]):
+    for kind, name, size in types:
+        print(f"{kind:<8} {size:#8x}  {name}")
+
+    print(f"\n{len(types)} types found")
+
+
+class FieldRepresentation:
+    def __init__(self):
+        pass
+
+
+class StructureRepresentation:
+    def __init__(self):
+        pass
+
+
+
+class LLDBKernel:
+    def __init__(self, kernel, version):
+        self.kernel = kernel
+        self.version = version
+        self._init_debugger()
+        self._init_target()
+
+    def _init_debugger(self):
+        self.debugger = lldb.SBDebugger.Create()
+        self.debugger.SetAsync(False)
+        self.debugger.HandleCommand("settings set target.load-script-from-symbol-file false")
+
+    def _init_target(self):
+        self.target = self.debugger.CreateTarget(self.kernel)
+        if not self.target.IsValid():
+            raise RuntimeError("Failed to create target")
+
+    def _showStructPacking(self, ctx, symbol, begin_offset=0, symsize=0, typedef=None, outerSize=0, memberName=None):
+        """ Recursively parse the field members of structure.
+            
+            params :
+                ctx - context containing configuration settings and the output formatter (standard.py) symbol (lldb.SBType) reference to symbol in binary
+            returns:
+                string containing lines of output.
+        """
+
+        O = ctx[0]
+        format_offset = _get_offset_formatter(ctx, "{:#06x},[{:#6x}]", "{:04d},[{:4d}]")
+        format_num = _get_num_formatter(ctx, "{:#04x}", "{:2d}")
+
+        ctype = "unknown type"
+        is_union = False
+        is_class = False
+        union_size = None
+        sym_size = symbol.GetByteSize()
+
+        if symbol.GetTypeClass() == lldb.eTypeClassUnion:
+            ctype = "union"
+            is_union = True
+            union_size = sym_size
+        if symbol.GetTypeClass() == lldb.eTypeClassStruct:
+            ctype = "struct"
+        if symbol.GetTypeClass() == lldb.eTypeClassClass:
+            ctype = "class"
+            is_class = True
+
+        outstr = O._indent
+        if not outerSize or outerSize == sym_size:
+            outstr += format_offset(begin_offset, sym_size)
+        elif outerSize < sym_size: # happens with c++ inheritance
+            outstr += format_offset(begin_offset, outerSize)
+        else:
+            outstr += O.format("{:s}{VT.DarkRed}{{{:s}}}{VT.Default}",
+                    format_offset(begin_offset, sym_size),
+                    format_num(outerSize - sym_size))
+
+        if typedef:
+            outstr += O.format(" {0}", typedef)
+        if symbol.IsAnonymousType():
+            outstr += O.format(" ({VT.DarkMagenta}anonymous {0}{VT.Default})", ctype)
+        else:
+            outstr += O.format(" ({VT.DarkMagenta}{0} {1}{VT.Default})", ctype, symbol.GetName())
+        if memberName:
+            outstr += O.format(" {0} {{", memberName)
+        else:
+            outstr += ") {"
+
+        print(outstr)
+
+        with O.indent():
+            _previous_size = 0
+            _packed_bit_offset = 0
+            _nfields = symbol.GetNumberOfFields()
+
+            if is_class:
+                _next_offset_in_bits = 0
+                _nclasses = symbol.GetNumberOfDirectBaseClasses()
+
+                for i in range(_nclasses):
+                    member = symbol.GetDirectBaseClassAtIndex(i)
+                    if i < _nclasses - 1:
+                        m_size_bits = symbol.GetDirectBaseClassAtIndex(i + 1).GetOffsetInBits()
+                    elif _nfields:
+                        m_size_bits = symbol.GetFieldAtIndex(0).GetOffsetInBits()
+                    else:
+                        m_size_bits = symbol.GetByteSize() * 8
+
+                    m_offset = member.GetOffsetInBytes() + begin_offset
+                    m_type = member.GetType()
+                    m_name = member.GetName()
+                    m_size = m_size_bits // 8
+
+                    _previous_size = m_size
+                    _packed_bit_offset = member.GetOffsetInBits() + m_size_bits
+
+                    self._showStructPacking(ctx, m_type, m_offset, str(m_type), outerSize=m_size, memberName=m_name)
+
+            for i in range(_nfields):
+                member = symbol.GetFieldAtIndex(i)
+                m_offset = member.GetOffsetInBytes() + begin_offset
+                m_offset_bits = member.GetOffsetInBits()
+
+                m_type = member.GetType()
+                m_name = member.GetName()
+                m_size = m_type.GetByteSize()
+
+                if member.IsBitfield():
+                    m_is_bitfield = True
+                    m_size_bits = member.GetBitfieldSizeInBits()
+                else:
+                    m_is_bitfield = False
+                    m_size_bits = m_size * 8
+
+                if not is_union and _packed_bit_offset < m_offset_bits:
+                    m_previous_offset = begin_offset + (_packed_bit_offset // 8)
+                    m_hole_bits = m_offset_bits - _packed_bit_offset
+                    if _packed_bit_offset % 8 == 0:
+                        print(O.format("{:s}{:s} ({VT.DarkRed}*** padding ***{VT.Default})", O._indent,
+                               format_offset(m_previous_offset, (m_hole_bits // 8))))
+                    else:
+                        print(O.format("{:s}{:s} ({VT.Brown}*** padding : {:s} ***{VT.Default})", O._indent,
+                                format_offset(m_previous_offset, _previous_size),
+                                format_num(m_hole_bits)))
+
+                _previous_size = m_size
+                _packed_bit_offset = m_offset_bits + m_size_bits
+
+                _type_class = m_type.GetTypeClass()
+                _canonical_type = m_type.GetCanonicalType()
+                _canonical_type_class = m_type.GetCanonicalType().GetTypeClass()
+
+                if _type_class == lldb.eTypeClassTypedef and _canonical_type_class in _UnionStructClass:
+                    self._showStructPacking(ctx, _canonical_type, m_offset, str(m_type), outerSize=union_size, memberName=m_name)
+                elif _type_class in _UnionStructClass:
+                    self._showStructPacking(ctx, m_type, m_offset, outerSize=union_size, memberName=m_name)
+                else:
+                    outstr = O._indent
+                    outstr += format_offset(m_offset, m_size)
+                    if is_union and union_size != (m_size_bits // 8):
+                        outstr += O.format("{VT.DarkRed}{{{:s}}}{VT.Default}",
+                                format_num(union_size - (m_size_bits // 8)))
+                    if m_is_bitfield:
+                        outstr += O.format(" ({VT.DarkGreen}{:s} : {:s}{VT.Default}) {:s}",
+                                m_type.GetName(),
+                                format_num(m_size_bits),
+                                m_name)
+                    else:
+                        outstr += O.format(" ({VT.DarkGreen}{:s}{VT.Default}) {:s}",
+                                m_type.GetName(), m_name)
+                    print(outstr)
+
+            referenceSize = sym_size
+            if outerSize:
+                referenceSize = min(outerSize, sym_size)
+
+            if not is_union and _packed_bit_offset < referenceSize * 8:
+                m_previous_offset = begin_offset + (_packed_bit_offset // 8)
+                m_hole_bits = referenceSize * 8 - _packed_bit_offset
+                if _packed_bit_offset % 8 == 0:
+                    print(O.format("{:s}{:s} ({VT.DarkRed}*** padding ***{VT.Default})", O._indent,
+                            format_offset(m_previous_offset, m_hole_bits // 8)))
+                else:
+                    print(O.format("{:s}{:s} ({VT.Brown}padding : {:s}{VT.Default})\n", O._indent,
+                            format_offset(m_previous_offset, _previous_size),
+                            format_num(m_hole_bits)))
+
+        print(f"{O._indent}}}")
+
+    def dump_struct_layout(self, ty_name, O):
+        type_list = self.target.FindTypes(ty_name)
+        if type_list.GetSize() == 0:
+            print(f"Type '{ty_name}' not found")
+            return
+
+        sym = type_list.GetTypeAtIndex(0)
+     
+        if sym.GetTypeClass() == lldb.eTypeClassTypedef:
+            sym = sym.GetCanonicalType()
+
+        if sym.GetTypeClass() not in _UnionStructClass:
+            return O.error("{0} is not a structure/union/class type", ty_name)
+
+        ctx = (O, True)
+        self._showStructPacking(ctx, sym, 0)
+    
+    def list_types(self):
+        WANTED = {lldb.eTypeClassStruct, lldb.eTypeClassUnion, lldb.eTypeClassClass, lldb.eTypeClassEnumeration}
+
+        seen = set()
+        types = []
+        for i in range(self.target.GetNumModules()):
+            module = self.target.GetModuleAtIndex(i)
+            type_list = module.GetTypes(
+                lldb.eTypeClassStruct | lldb.eTypeClassUnion | lldb.eTypeClassClass | lldb.eTypeClassEnumeration
+            )
+            for j in range(type_list.GetSize()):
+                t = type_list.GetTypeAtIndex(j)
+                name = t.GetName()
+                if not name or name in seen:
+                    continue
+                seen.add(name)
+                tc = t.GetTypeClass()
+                kind = {
+                    lldb.eTypeClassStruct: "struct",
+                    lldb.eTypeClassUnion:  "union",
+                    lldb.eTypeClassClass:  "class",
+                    lldb.eTypeClassEnumeration : "enum",
+                }.get(tc, "?")
+                # decl = t.GetDeclaration()
+                # fs = decl.GetFileSpec()
+                # path = (fs.GetDirectory() or "") + "/" + (fs.GetFilename() or "")
+                # types.append((kind, name, t.GetByteSize(), path.lstrip("/")))
+                types.append((kind, name, t.GetByteSize()))
+        return types
+
+    def find_structs_containing_type(self, needle_type_name, recursive=False):
+        COMPOSITE = {lldb.eTypeClassStruct, lldb.eTypeClassUnion, lldb.eTypeClassClass}
+        MASK = lldb.eTypeClassStruct | lldb.eTypeClassUnion | lldb.eTypeClassClass
+
+        def canonical_name(t: lldb.SBType) -> str:
+            """Strip pointer/ref/typedef layers to get the underlying type name."""
+            t = t.GetCanonicalType()
+            while t.IsPointerType() or t.IsReferenceType():
+                t = t.GetPointeeType().GetCanonicalType()
+            return t.GetName() or ""
+
+        def field_matches(field_type: lldb.SBType) -> bool:
+            return canonical_name(field_type) == needle_type_name
+
+        def contains_needle(sbtype: lldb.SBType, visited: set) -> bool:
+            """
+            Check if sbtype has a field whose (dereferenced) type matches needle.
+            If recursive=True, also descend into nested composite fields.
+            """
+            type_name = sbtype.GetName()
+            if type_name in visited:
+                return False
+            visited.add(type_name)
+
+            for i in range(sbtype.GetNumberOfFields()):
+                field = sbtype.GetFieldAtIndex(i)
+                ft = field.GetType().GetCanonicalType()
+
+                # Direct match (value, pointer, or reference to needle)
+                if field_matches(ft):
+                    return True
+
+                # Recurse into nested composite types if requested
+                if recursive and ft.GetTypeClass() in COMPOSITE:
+                    if contains_needle(ft, visited):
+                        return True
+
+            return False
+
+        # Collect all composite types from the module
+        seen = set()
+        matches = []
+
+        for mi in range(self.target.GetNumModules()):
+            module = self.target.GetModuleAtIndex(mi)
+            type_list = module.GetTypes(MASK)
+
+            for ti in range(type_list.GetSize()):
+                t = type_list.GetTypeAtIndex(ti)
+                name = t.GetName()
+                if not name or name in seen:
+                    continue
+                seen.add(name)
+
+                if contains_needle(t, set()):
+                    kind = {
+                        lldb.eTypeClassStruct: "struct",
+                        lldb.eTypeClassUnion:  "union",
+                        lldb.eTypeClassClass:  "class",
+                    }.get(t.GetTypeClass(), "?")
+                    matches.append((kind, name, t.GetByteSize(), t))
+
+        return matches
+
+
 def main():
     args = arguments()
     storage = KDKStorage(Path(KDK_PATH))
@@ -742,13 +747,18 @@ def main():
         print(f'[-] Version {args.version} not found!')
         return
 
+    lldb_kernel = LLDBKernel(kernel.binary, args.version)
+
     if args.struct and args.find:
-        matches = find_structs_containing_type(kernel.binary, args.struct)
+        matches = lldb_kernel.find_structs_containing_type(args.struct)
         print_matches(matches, args.struct)
     elif args.struct is not None:
-        dump_struct_layout(kernel.binary, args.struct, CommandOutput(''))
+        lldb_kernel.dump_struct_layout(args.struct, CommandOutput(''))
+        # struct_layout = lldb_kernel.get_struct_layout(args.struct, CommandOutput(''))
+        # print_struct(struct_layout)
     else:
-        list_types_from_module(kernel.binary)
+        types = lldb_kernel.list_types()
+        print_types(types)
 
 
 if __name__ == '__main__':
