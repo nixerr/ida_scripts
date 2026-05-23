@@ -13,6 +13,7 @@ def make_kernel_const_segments_rw():
             seg = ida_segment.getseg(segment)
             seg.perm = ida_segment.SEGPERM_READ | ida_segment.SEGPERM_WRITE
             seg.update()
+            print(f'[i] make \'com.apple.kernel:__const\' (0x{seg.start_ea:x}) writtable')
 
 def find_panic_trap_to_debugger():
     base_ea     = idaapi.get_imagebase()
@@ -33,7 +34,7 @@ def find_panic_trap_to_debugger():
 
     if (ida_funcs.add_func_ex(func_str)):
         ida_name.set_name(func_start, "panic_trap_to_debugger")
-    print("[i] panic_trap_to_debugger: 0x{0:x}".format(func_start))
+    print(f"[i] panic_trap_to_debugger: 0x{func_start:x}")
 
 def run():
     make_kernel_const_segments_rw()

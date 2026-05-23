@@ -60,7 +60,7 @@ class myEmu_stage_init(Emu):
         self.found_OSMetaClass_calls = 0
         self.static_calls_of_osmetaclass = 0
         self.dynamic_calls_of_osmetaclass = 0
-        self.scan_func()
+        self.scan_func(self.start, self.end)
 
     def _hook_mem_invalid(self, uc, access, address, size, value, user_data):
         addr = self._alignAddr(address)
@@ -173,15 +173,27 @@ class myEmu_stage_init(Emu):
         self.calls[atk(osmetaclass)] = OSMetaClassConstructorCall(osmetaclass, name, parent, size)
         return osmetaclass
 
-    def scan_func(self):
-        cur_addr = self.start
-        while cur_addr <= self.end:
-            if self.is_BL_insn(cur_addr):
-                if self.is_call_osmetaclass_contructor(cur_addr):
+    def is_the_same_module(self, address):
+        if idc.get_segm_name(self.start) == idc.get_segm_name(address):
+            return True
+        return False
+        
+
+    def scan_func(self, s, e):
+        c = s
+        while c <= e:
+            if self.is_BL_insn(c):
+                bl_target = self.get_BL_addr(c)
+                if self.is_call_osmetaclass_contructor(c):
                     self.static_calls_of_osmetaclass += 1
+                elif 'com.apple.kernel:__text' == idc.get_segm_name(bl_target):
+                    self.hooks.append(bl_target)
+                elif self.is_the_same_module(bl_target):
+                    bl_target_end = idc.get_func_attr(bl_target, FUNCATTR_END) - 4
+                    self.scan_func(bl_target, bl_target_end)
                 else:
-                    self.hooks.append(self.get_BL_addr(cur_addr))
-            cur_addr += 4
+                    self.hooks.append(bl_target)
+            c += 4
 
     def emulate(self):
         self._createUc()
@@ -513,11 +525,10 @@ class Hierarchy:
         if class_name in ['OSObject', 'OSMetaClass']:
             s =  f'struct __cppobj {class_name} {chr(0x7b)}\n'
 
-            s += f'    {self.vtable(class_name).sanitaize_name_struct_vtable()} *__vftable;\n'
+            s += f'    {self.vtable(class_name).sanitize_name_struct_vtable()} *__vftable;\n'
             start = 8
         else:
             parent = self.get_parent(class_name)
-
             s = f'struct __cppobj {NameSanitizer.sanitize_name(class_name)} : {NameSanitizer.sanitize_name(parent)} {chr(0x7b)}\n'
             start = self.get_size(self.get_parent(class_name))
 
@@ -541,6 +552,10 @@ class Hierarchy:
                 tid = idc.get_struc_id(NameSanitizer.sanitize_name(class_name))
                 if tid == idc.BADADDR:
                     create_struct(self.get_class_declaration(class_name))
+                elif idc.get_struc_size(tid) == 0:
+                    # ida_struct.del_struc(get_struc(tid))
+                    create_struct(self.get_class_declaration(class_name))
+
 
 
 def create_struct(decl: str):
@@ -618,7 +633,7 @@ class VtableFunction:
         if self.name is not None:
             return self.name
 
-        type_name = self.vtable.sanitaize_name()
+        type_name = self.vtable.sanitize_name()
 
         method = self.find_method_name(self.vtable.hierarchy)
         self.name = f'{type_name}__{method}_0x{self.offset:X}_0x{self.paccode:X}'
@@ -634,11 +649,12 @@ class VtableFunction:
             self.name = idc.get_name(self.function_address)
 
     def propagate_type(self):
-        first_arg_type = f'{self.vtable.sanitaize_name()} *'
+        first_arg_type = f'{self.vtable.sanitize_name()} *'
+        ida_hexrays.init_hexrays_plugin()
         ida_hexrays.decompile(ida_funcs.get_func(self.function_address))
         idc.auto_wait()
         proto = idc.get_type(self.function_address)
-        if proto is not None and '()' not in proto:
+        if proto is not None and '()' not in proto and ',' in proto:
             new_proto = proto[0:proto.find('(')+1] + first_arg_type + proto[proto.find(',')]
             idc.SetType(self.function_address, new_proto)
 
@@ -675,6 +691,8 @@ class NameSanitizer:
         ['-', '_'],
         [':', '_'],
         ['.', '_'],
+        ['[', '_'],
+        [']', '_'],
     ]
 
     @staticmethod
@@ -712,14 +730,14 @@ class Vtable:
                 return True
         return False
 
-    def sanitaize_name_struct_vtable(self):
-        return f'{self.sanitaize_name()}_vtbl'
+    def sanitize_name_struct_vtable(self):
+        return f'{self.sanitize_name()}_vtbl'
 
-    def sanitaize_name(self):
+    def sanitize_name(self):
         return NameSanitizer.sanitize_name(self.name)
 
     def apply_name(self):
-        idc.set_name(self.address, f'vtable_for_{self.sanitaize_name()}')
+        idc.set_name(self.address, f'vtable_for_{self.sanitize_name()}')
 
     def is_address_part_of_vtable(self, address):
         return self.address < address < self.address_end
@@ -737,7 +755,7 @@ class Vtable:
             func.rename_function()
 
     def create_vtable_struct(self):
-        tid = idc.add_struc(idc.BADADDR, self.sanitaize_name_struct_vtable(), False)
+        tid = idc.add_struc(idc.BADADDR, self.sanitize_name_struct_vtable(), False)
         if tid == idc.BADADDR:
             return False
 
@@ -749,7 +767,7 @@ class Vtable:
             idc.set_member_name(tid, func.offset, func.function_name())
 
     def update_vtable_struct(self):
-        tid = idc.get_struc_id(self.sanitaize_name_struct_vtable())
+        tid = idc.get_struc_id(self.sanitize_name_struct_vtable())
         if tid == idc.BADADDR:
             self.create_vtable_struct()
         else:
@@ -790,7 +808,7 @@ def collect_kalloc_types(seen: Array) -> Dict:
         while curr_addr < seg_end:
             if ida_bytes.get_qword(curr_addr + 0x10) != 0:
                 next_kt = KallocType.parse(curr_addr)
-                if next_kt.name not in kalloc_types.keys() and next_kt.name not in seen and next_kt.sanitaized_name not in KallocType.skip_names:
+                if next_kt.name not in kalloc_types.keys() and next_kt.name not in seen and next_kt.sanitized_name not in KallocType.skip_names:
                     kalloc_types[next_kt.name] = next_kt
             curr_addr += 0x40
 
@@ -809,9 +827,9 @@ class KallocType:
         self.name = name
         self.flag = flag
         self.size = size
-        self.sanitaized_name = self.sanitaize_name()
+        self.sanitized_name = self.sanitize_name()
 
-    def sanitaize_name(self):
+    def sanitize_name(self):
         return NameSanitizer.sanitize_name(self.name)
 
     def get_class_declaration(self):
@@ -820,7 +838,7 @@ class KallocType:
         end = self.size
 
         is_packed = end % 8
-        s =  f'struct {'__attribute__((packed))' if is_packed else ''} {self.sanitaized_name} {chr(0x7b)}\n'
+        s =  f'struct {'__attribute__((packed))' if is_packed else ''} {self.sanitized_name} {chr(0x7b)}\n'
 
         while start < end:
             still = end-start
@@ -831,17 +849,17 @@ class KallocType:
                 s += f'    __int16 field_{start:x};\n'
                 start += 2
             elif 2 < still <= 8:
-                s += f'    uint32_t field_{start:x};\n'
+                s += f'    __int32 field_{start:x};\n'
                 start += 4
             else:
-                s += f'    uint64_t field_{start:x};\n'
+                s += f'    __int64 field_{start:x};\n'
                 start += 8
 
         s += '};\n'
         return s
 
     def create_structure(self):
-        tid = idc.get_struc_id(self.sanitaized_name)
+        tid = idc.get_struc_id(self.sanitized_name)
         if tid == idc.BADADDR:
             create_struct(self.get_class_declaration())
 
@@ -884,17 +902,65 @@ def load_metaclass_info(filename):
 
 hier = None
 kts = None
+platform = None
+
+def get_platform():
+    global platform
+
+    MH_MAGIC_64      = 0xfeedfacf
+    LC_BUILD_VERSION = 0x32
+
+    if platform is not None:
+        return platform
+
+    seg_header = ida_segment.get_segm_by_name('com.apple.kernel:HEADER')
+    header = seg_header.start_ea
+    magic = ida_bytes.get_dword(header)
+    if magic != MH_MAGIC_64:
+        print(f'[-] Wrong header')
+
+    cput        = ida_bytes.get_dword(header+4)
+    cpusub      = ida_bytes.get_dword(header+8)
+    filetype    = ida_bytes.get_dword(header+12)
+    ncmds       = ida_bytes.get_dword(header+16)
+    sizeofcmds  = ida_bytes.get_dword(header+20)
+    flags       = ida_bytes.get_dword(header+24)
+    reserved    = ida_bytes.get_dword(header+28)
+
+    offset = 32
+    for idx in range(ncmds):
+        if offset > seg_header.end_ea - header:
+            break
+
+        cmd     = ida_bytes.get_dword(header+offset)
+        cmdsize = ida_bytes.get_dword(header+offset+4)
+
+        if cmd == LC_BUILD_VERSION:
+            platform = ida_bytes.get_dword(header+offset+8)
+            return platform
+
+        offset += cmdsize
+
+    return None
 
 
 def run():
     os.chdir(os.path.dirname(idc.get_idb_path()))
     main()
 
+
+MACOS = 0x1
+IOS   = 0x2
+
+
 def main():
     global hier
     global kts
 
-    ida_typeinf.del_til('xnu_7195_arm64')
+    platform = get_platform()
+
+    if platform == IOS:
+        ida_typeinf.del_til('xnu_7195_arm64')
 
     emulated_info = None
     if os.access('metaclass_info.txt', 644):
@@ -904,13 +970,15 @@ def main():
         print(f'Found OSMetaClass by emulating => {len(emulated_info)}')
         save_metaclass_info(emulated_info, 'metaclass_info.txt')
 
-    apply_names(emulated_info)
+    if platform == IOS:
+        apply_names(emulated_info)
     find_vtables_via_FFFC(emulated_info)
 
     hier = Hierarchy(emulated_info)
-    hier.apply_names()
-    hier.rename_functions()
-    hier.update_vtables()
+    if platform == IOS:
+        hier.apply_names()
+        hier.rename_functions()
+        hier.update_vtables()
     hier.create_structures()
 
     for cl in hier.hierarchy.keys():
@@ -920,7 +988,7 @@ def main():
     kts = collect_kalloc_types(hier.hierarchy.keys())
     for k in kts.keys():
         kts[k].create_structure()
-        # print(f'{kts[k].address:x} {kts[k].sanitaized_name:60s} {k}')
+        # print(f'{kts[k].address:x} {kts[k].sanitized_name:60s} {k}')
 
 if __name__ == '__main__':
     main()
