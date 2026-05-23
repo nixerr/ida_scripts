@@ -60,7 +60,7 @@ class myEmu_stage_init(Emu):
         self.found_OSMetaClass_calls = 0
         self.static_calls_of_osmetaclass = 0
         self.dynamic_calls_of_osmetaclass = 0
-        self.scan_func(self.start, self.end)
+        self.scan_func(self.start, self.end, True)
 
     def _hook_mem_invalid(self, uc, access, address, size, value, user_data):
         addr = self._alignAddr(address)
@@ -177,23 +177,24 @@ class myEmu_stage_init(Emu):
         if idc.get_segm_name(self.start) == idc.get_segm_name(address):
             return True
         return False
-        
 
-    def scan_func(self, s, e):
+    def scan_func(self, s, e, r):
+        has_osmetaclass_call = False
         c = s
         while c <= e:
             if self.is_BL_insn(c):
                 bl_target = self.get_BL_addr(c)
+                bl_target_end = idc.get_func_attr(bl_target, FUNCATTR_END) - 4
                 if self.is_call_osmetaclass_contructor(c):
                     self.static_calls_of_osmetaclass += 1
-                elif 'com.apple.kernel:__text' == idc.get_segm_name(bl_target):
-                    self.hooks.append(bl_target)
-                elif self.is_the_same_module(bl_target):
-                    bl_target_end = idc.get_func_attr(bl_target, FUNCATTR_END) - 4
-                    self.scan_func(bl_target, bl_target_end)
+                    has_osmetaclass_call = True
+                elif r == True:
+                    if self.scan_func(bl_target, bl_target_end, False) == False:
+                        self.hooks.append(bl_target)
                 else:
                     self.hooks.append(bl_target)
             c += 4
+        return has_osmetaclass_call
 
     def emulate(self):
         self._createUc()
