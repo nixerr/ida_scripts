@@ -309,11 +309,15 @@ class BinDiffWorkSpace():
         cur = self.con.cursor()
         entries = cur.execute("SELECT matchesDbPath FROM diffs").fetchall()
         entries = [x[0] for x in entries]
-        entries = sorted(entries, key=cmp_to_key(sort_entries))
+        entries = sorted(entries, key=cmp_to_key(BinDiffWorkSpace.sort_entries))
         cur.execute("DELETE FROM diffs")
         for entry in entries:
             cur.execute(f"INSERT INTO diffs(matchesDbPath, isfunctiondiff) VALUES('{entry}', 0)")
         self.con.commit()
+
+    @staticmethod
+    def sort_entries(e1, e2):
+        return KDKStorage.compare_version(e1.split(' x ')[0], e2.split(' x ')[0])
 
 
 def generate_binexport(m):
