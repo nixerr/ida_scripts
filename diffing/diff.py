@@ -1,19 +1,16 @@
 #!/usr/bin/python
 
 import sys, os
-import pprint
 import shutil
 import struct
 import sqlite3
 import argparse
-import subprocess
-import multiprocessing
 from pathlib import Path
 from bindiff import BinDiff
 from multiprocessing import Pool
 from functools import cmp_to_key
-from enum import IntEnum
 
+from ida_runner import IDABinaryType, IDARunner
 
 KDK_PATH = 'D:\\work\\apple\\platform\\kdk'
 PLG_PATH = "D:\\work\\apple\\tools\\ida_plugins\\ida_scripts\\diffing\\binexp.py"
@@ -48,45 +45,6 @@ def arguments():
         help = 'List all available KDK versions')
 
     return parser.parse_args(args=None if sys.argv[1:] else ['--help'])
-
-
-class IDABinaryType(IntEnum):
-    KERNELCACHE = 0
-    KERNEL      = 1
-    KEXT_FAT    = 2
-    KEXT        = 3
-
-    def __str__(self):
-        if self.value == self.KERNELCACHE:
-            return "Apple XNU kernelcache for ARM64e"
-        elif self.value in [IDABinaryType.KERNEL, IDABinaryType.KEXT]:
-            return "Mach-O"
-        elif self.value == IDABinaryType.KEXT_FAT:
-            return "Fat Mach-O File, 2"
-        print("WTF")
-        sys.exit(0)
-
-
-class IDARunner(object):
-    @staticmethod
-    def execute(type: IDABinaryType,  binary: str = None, idbdir: str = None, script: str = None, args: str = None, logfile: str = None, verbose: bool = False):
-        command = ["idat", "-A", f"-T{str(type)}"]
-
-        if script and args:
-            command.append(f"-S{script} {' '.join(args)}")
-        elif script:
-            command.append(f"-S{script}")
-
-        if logfile:
-            command.append(f"-L{logfile}")
-
-        if idbdir:
-            command.append(f"-o{idbdir}")
-
-        command.append(binary)
-        if verbose:
-            print(command)
-        subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 class KDK():
@@ -193,14 +151,6 @@ class KDKElement:
     def is_macho_fat(self):
         with open(self.binary, "rb") as fd:
             return struct.unpack("<I", fd.read(4))[0] == 0xbebafeca
-
-    def run_ida_cmd(self):
-        IDARunner.execute(
-            type    = IDABinaryType.KEXT_FAT if self.is_macho_fat() else IDABinaryType.KEXT,
-            binary  = self.binary,
-            script  = PLG_PATH,
-            args    = [self.binexport]
-        )
 
     def commit(self):
         os.rename(self.idb, self.output_idb)
@@ -322,7 +272,13 @@ class BinDiffWorkSpace():
 
 def generate_binexport(m):
     print(f"[i] Generating binexport for {m.name}_{m.version}")
-    m.run_ida_cmd()
+    IDARunner.set_idapro_path("/Applications/IDAPro_9.3.app/Contents/MacOS")
+    IDARunner.execute(
+        type    = IDABinaryType.KEXT_FAT if m.is_macho_fat() else IDABinaryType.KEXT,
+        binary  = m.binary,
+        script  = PLG_PATH,
+        args    = [m.binexport]
+    )
     m.create_output_dir()
     m.commit()
 
