@@ -161,6 +161,7 @@ def find_common_functions():
     define_function_by_string("handle_user_abort", "User abort from non-interruptible context")
     define_function_by_string("handle_kernel_abort", "Unexpected fault in kernel static region")
     define_function_by_string("mach_syscall", "Returned from exception_triage()? @%s:%d")
+    define_function_by_string("zone_create", "zone_create: element size too large: %zd @%s:%d")
 
 
 def find_mig_e():

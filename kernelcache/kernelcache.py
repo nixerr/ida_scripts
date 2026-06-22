@@ -140,6 +140,17 @@ class myEmu_stage_init(Emu):
     def is_BL_insn(self, addr):
         return ida_ua.print_insn_mnem(addr) == 'BL'
 
+    def is_stub_func(self, addr):
+        if ida_ua.print_insn_mnem(addr) == 'ADRL' and ida_ua.print_insn_mnem(addr+8) == 'LDR' and ida_ua.print_insn_mnem(addr+12) == 'BRAA':
+            return True
+        return False
+    
+    def get_stub_func_ptr(self, addr):
+        if ida_ua.print_insn_mnem(addr) == 'ADRL' and ida_ua.print_insn_mnem(addr+8) == 'LDR' and ida_ua.print_insn_mnem(addr+12) == 'BRAA':
+            ptr_to_func = idc.get_operand_value(addr, 1)
+            return ida_bytes.get_qword(ptr_to_func)
+        return None
+
     def is_call_osmetaclass_contructor(self, addr):
         if self.is_BL_insn(addr):
             if myEmu_stage_init.OSMETACLASS_CONSTRUCTOR_ADDR == self.get_BL_addr(addr):
@@ -185,9 +196,14 @@ class myEmu_stage_init(Emu):
             if self.is_BL_insn(c):
                 bl_target = self.get_BL_addr(c)
                 bl_target_end = idc.get_func_attr(bl_target, FUNCATTR_END) - 4
-                if self.is_call_osmetaclass_contructor(c):
+                if self.is_call_osmetaclass_contructor(c) or (self.is_stub_func(bl_target) and self.get_stub_func_ptr(bl_target) == myEmu_stage_init.OSMETACLASS_CONSTRUCTOR_ADDR):
                     self.static_calls_of_osmetaclass += 1
                     has_osmetaclass_call = True
+                elif self.is_stub_func(bl_target):
+                    stub_func_start = self.get_stub_func_ptr(bl_target)
+                    stub_func_end = idc.get_func_attr(stub_func_start, FUNCATTR_END) - 4
+                    if self.scan_func(stub_func_start, stub_func_end, False) == False:
+                        self.hooks.append(bl_target)
                 elif r == True:
                     if self.scan_func(bl_target, bl_target_end, False) == False:
                         self.hooks.append(bl_target)
