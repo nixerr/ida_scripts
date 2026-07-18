@@ -13,6 +13,8 @@ import string
 import lldb
 import re
 
+from kdk_storage import KDKStorage, KDKElement, Kernel
+
 KDK_PATH = "/Users/vsh/Research/platform/kdk"
 
 def arguments():
@@ -298,113 +300,6 @@ class CommandOutput(object):
             else:
                 o = o.strip()
                 self.target_cmd_options[o] = a
-
-
-class KDK():
-    def __init__(self, path: Path):
-        self.path: Path = path.resolve()
-        self.version = self.path.name[4:-4]
-        self.is_beta = KDK.version_is_beta(self.version)
-
-    @staticmethod
-    def version_is_beta(v):
-        return ord(v[-1]) > 0x60
-
-    def driver(self, name):
-        return Driver(self, name)
-
-    def kernel(self, name):
-        return Kernel(self, name)
-
-
-class KDKStorage():
-    def __init__(self, path: Path):
-        self.storage_path: Path = path.resolve()
-        self.versions: list[KDK] = []
-        self.hashmap_versions = {}
-        self.scan_kdk_directory()
-
-    @staticmethod
-    def compare_kdk_version(v1: KDK, v2: KDK):
-        return KDKStorage.compare_version(v1.version, v2.version)
-
-    @staticmethod
-    def compare_version(v1, v2):
-        n1 = v1.split('_')[0].split('.')
-        n2 = v2.split('_')[0].split('.')
-
-        for i in range(max(len(n1), len(n2))):
-            if i < len(n1) and i < len(n2):
-                if n1[i] == n2[i]:
-                    continue
-                if n1[i] < n2[i]:
-                    return -1
-                elif n1[i] > n2[i]:
-                    return 1
-            elif i < len(n1) and i >= len(n2):
-                return 1
-            elif i >= len(n1) and i < len(n2):
-                return -1
-
-        if KDK.version_is_beta(v1) == True and KDK.version_is_beta(v2) == False:
-            return -1
-        elif KDK.version_is_beta(v1) == False and KDK.version_is_beta(v2) == True:
-            return 1
-
-        if v1.split('_')[1] < v2.split('_')[1]:
-            return -1
-        else:
-            return 1
-
-    def scan_kdk_directory(self) -> list:
-        for kdk_path in self.storage_path.iterdir():
-            if kdk_path.is_dir():
-                kdk = KDK(kdk_path)
-                self.versions.append(kdk)
-                self.hashmap_versions[kdk.version] = kdk
-
-        self.versions = sorted(self.versions, key=cmp_to_key(KDKStorage.compare_kdk_version))
-
-    def get_versions_list(self, skip_betas: bool):
-        versions = []
-        for kdk in self.versions:
-            if kdk.is_beta and skip_betas:
-                continue
-            versions.append(kdk.version)
-        return versions
-
-    def check_existance(self, versions):
-        set(versions).issubset(set(self.hashmap_versions.keys()))
-
-    def get_kernel(self, version, name):
-        if version in self.hashmap_versions.keys():
-            return Kernel(self.hashmap_versions[version], name)
-        return None
-
-
-class KDKElement:
-    def __init__(self, kdk: KDK, name, is_kernel):
-        self.is_kernel = is_kernel
-        self.name      = name
-        self.version   = kdk.version
-        self.kdk_path  = kdk.path
-
-
-class Driver(KDKElement):
-    element_path = os.path.join('System', 'Library', 'Extensions')
-    bin_path = os.path.join('Contents', 'MacOS')
-    def __init__(self, kdk: KDK, name):
-        super().__init__(kdk, name, False)
-        self.kdk_driver_dir = os.path.join(self.kdk_path, Driver.element_path, f"{name}.kext")
-        self.binary = os.path.join(self.kdk_driver_dir, Driver.bin_path, self.name)
-
-
-class Kernel(KDKElement):
-    element_path = os.path.join('System', 'Library', 'Kernels')
-    def __init__(self, kdk: KDK, name):
-        super().__init__(kdk, name, True)
-        self.binary = os.path.join(self.kdk_path, Kernel.element_path, self.name)
-
 
 _UnionStructClass = [ lldb.eTypeClassStruct, lldb.eTypeClassClass, lldb.eTypeClassUnion ]
 
@@ -742,9 +637,9 @@ def main():
             print(msg)
         return
 
-    kernel = storage.get_kernel(args.version, args.kernel)
+    kernel = storage.kernel(args.version, args.kernel)
     if kernel == None:
-        print(f'[-] Version {args.version} not found!')
+        print(f'[-] Version {args.version} not found or found few available candidates!')
         return
 
     lldb_kernel = LLDBKernel(kernel.binary, args.version)
