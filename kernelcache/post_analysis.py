@@ -162,6 +162,13 @@ def find_common_functions():
     define_function_by_string("handle_kernel_abort", "Unexpected fault in kernel static region")
     define_function_by_string("mach_syscall", "Returned from exception_triage()? @%s:%d")
     define_function_by_string("zone_create", "zone_create: element size too large: %zd @%s:%d")
+    define_function_by_string("vm_map_enter", "%d[%s] %s: map size 0x%llx over RLIMIT_AS 0x%llx")
+    define_function_by_string("vm_io_reprioritize_init", "Unable to start I/O reprioritization thread (%d) @%s:%d")
+    define_function_by_string("vm_object_bootstrap", "vm objects")
+    define_function_by_string("zone_submap_init", "ksubmap[%s]: failed to make first entry (%d) @%s:%d")
+    define_function_by_string("pmap_startup", "Filling vm_pages with pattern: 0x%x")
+    define_function_by_string("kernel_bootstrap_thread", "PE_lockdown_iokit")
+    define_function_by_string("vm_free_delayed_pages", "vm pages array")
 
 
 def find_mig_e():

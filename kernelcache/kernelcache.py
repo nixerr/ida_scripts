@@ -825,7 +825,7 @@ def collect_kalloc_types(seen: Array) -> Dict:
         while curr_addr < seg_end:
             if ida_bytes.get_qword(curr_addr + 0x10) != 0:
                 next_kt = KallocType.parse(curr_addr)
-                if next_kt.name not in kalloc_types.keys() and next_kt.name not in seen and next_kt.sanitized_name not in KallocType.skip_names:
+                if next_kt is not None and next_kt.name not in kalloc_types.keys() and next_kt.name not in seen and next_kt.sanitized_name not in KallocType.skip_names:
                     kalloc_types[next_kt.name] = next_kt
             curr_addr += 0x40
 
@@ -889,7 +889,11 @@ class KallocType:
         flag_offset = 0x28 + address
         size_offset = 0x2c + address
         name = ida_bytes.get_strlit_contents(ida_bytes.get_qword(name_offset), idc.BADADDR, ida_nalt.STRTYPE_C).decode()
-        name = name.split('site.')[1]
+        try:
+            name = name.split('site.')[1]
+        except:
+            print(name)
+            return None
         # typ = ''
         # if ida_bytes.get_byte(get_qword(typ_offset)) != 0x0:
         #     typ = ida_bytes.get_strlit_contents(ida_bytes.get_qword(typ_offset), idc.BADADDR, ida_nalt.STRTYPE_C).decode()
