@@ -11,6 +11,7 @@ from multiprocessing import Pool
 from functools import cmp_to_key
 
 from ida_runner import IDABinaryType, IDARunner
+from kdk_storage import KDKStorage, KDKElement, Driver, Kernel
 
 KDK_PATH = 'D:\\work\\apple\\platform\\kdk'
 PLG_PATH = "D:\\work\\apple\\tools\\ida_plugins\\ida_scripts\\diffing\\binexp.py"
@@ -45,156 +46,6 @@ def arguments():
         help = 'List all available KDK versions')
 
     return parser.parse_args(args=None if sys.argv[1:] else ['--help'])
-
-
-class KDK():
-    def __init__(self, path: Path):
-        self.path: Path = path.resolve()
-        self.version = self.path.name[4:-4]
-        self.is_beta = KDK.version_is_beta(self.version)
-
-    @staticmethod
-    def version_is_beta(v):
-        return ord(v[-1]) > 0x60
-
-    def driver(self, name):
-        return Driver(self, name)
-
-    def kernel(self, name):
-        return Kernel(self, name)
-
-    def handle_driver(self, pool, name):
-        driver = self.driver(name)
-        driver.handle(pool)
-
-    def handle_kernel(self, pool, name):
-        kernel = self.kernel(name)
-        kernel.handle(pool)
-
-
-class KDKStorage():
-    def __init__(self, path: Path):
-        self.storage_path: Path = path.resolve()
-        self.versions: list[KDK] = []
-        self.hashmap_versions = {}
-        self.scan_kdk_directory()
-
-    @staticmethod
-    def compare_kdk_version(v1: KDK, v2: KDK):
-        return KDKStorage.compare_version(v1.version, v2.version)
-
-    @staticmethod
-    def compare_version(v1, v2):
-        n1 = v1.split('_')[0].split('.')
-        n2 = v2.split('_')[0].split('.')
-
-        for i in range(max(len(n1), len(n2))):
-            if i < len(n1) and i < len(n2):
-                if n1[i] == n2[i]:
-                    continue
-                if n1[i] < n2[i]:
-                    return -1
-                elif n1[i] > n2[i]:
-                    return 1
-            elif i < len(n1) and i >= len(n2):
-                return 1
-            elif i >= len(n1) and i < len(n2):
-                return -1
-
-        if KDK.version_is_beta(v1) == True and KDK.version_is_beta(v2) == False:
-            return -1
-        elif KDK.version_is_beta(v1) == False and KDK.version_is_beta(v2) == True:
-            return 1
-
-        if v1.split('_')[1] < v2.split('_')[1]:
-            return -1
-        else:
-            return 1
-
-
-    def scan_kdk_directory(self) -> list:
-        for kdk_path in self.storage_path.iterdir():
-            if kdk_path.is_dir():
-                kdk = KDK(kdk_path)
-                self.versions.append(kdk)
-                self.hashmap_versions[kdk.version] = kdk
-
-        self.versions = sorted(self.versions, key=cmp_to_key(KDKStorage.compare_kdk_version))
-
-    def get_versions_list(self, skip_betas: bool):
-        versions = []
-        for kdk in self.versions:
-            if kdk.is_beta and skip_betas:
-                continue
-            versions.append(kdk.version)
-        return versions
-
-    def check_existance(self, versions):
-        set(versions).issubset(set(self.hashmap_versions.keys()))
-
-
-class KDKElement:
-    def __init__(self, kdk, name, is_kernel):
-        self.is_kernel = is_kernel
-        self.name      = name
-        self.version   = kdk.version
-        self.kdk_path  = kdk.path
-
-    def fini_init(self):
-        self.save_dir         = os.path.join(out_path, self.version)
-        self.binexport        = f"{self.name}_{self.version}.BinExport"
-        self.idb              = f"{self.binary}.i64"
-        self.output_dir       = os.path.join(out_path, self.version)
-        self.output_binexport = os.path.join(self.output_dir, f"{os.path.basename(self.binexport)}")
-        self.output_idb       = os.path.join(self.output_dir, f"{os.path.basename(self.binary)}.i64")
-
-    def is_macho_fat(self):
-        with open(self.binary, "rb") as fd:
-            return struct.unpack("<I", fd.read(4))[0] == 0xbebafeca
-
-    def commit(self):
-        os.rename(self.idb, self.output_idb)
-        os.rename(self.binexport, self.output_binexport)
-
-    def handle(self, pool):
-        self.cleanup()
-        if self.need_to_generate_idb() and self.need_to_generate_binexport():
-            pool.apply_async(generate_binexport, args=(self,))
-        else:
-            print(f"[!] Exists({os.path.basename(self.output_idb)}) is {self.need_to_generate_idb() == False}")
-            print(f"[!] Exists({os.path.basename(self.output_binexport)}) is {self.need_to_generate_binexport() == False}")
-
-    def cleanup(self):
-        if os.path.exists(self.idb):
-            os.remove(self.idb)
-
-    def need_to_generate_idb(self):
-        return os.path.exists(self.output_idb) == False
-
-    def need_to_generate_binexport(self):
-        return os.path.exists(self.output_binexport) == False
-
-    def create_output_dir(self):
-        if os.path.exists(self.output_dir) == False:
-            os.mkdir(self.output_dir)
-
-
-class Driver(KDKElement):
-    element_path = os.path.join('System', 'Library', 'Extensions')
-    bin_path = os.path.join('Contents', 'MacOS')
-    def __init__(self, kdk: KDK, name):
-        super().__init__(kdk, name, False)
-        self.kdk_driver_dir = os.path.join(self.kdk_path, Driver.element_path, f"{name}.kext")
-        self.binary = os.path.join(self.kdk_driver_dir, Driver.bin_path, self.name)
-        self.fini_init()
-
-
-class Kernel(KDKElement):
-    element_path = os.path.join('System', 'Library', 'Kernels')
-    def __init__(self, kdk: KDK, name):
-        super().__init__(kdk, name, True)
-        self.binary = os.path.join(self.kdk_path, Kernel.element_path, self.name)
-        self.fini_init()
 
 
 class BinDiffWorkSpace():
@@ -283,22 +134,74 @@ def generate_binexport(m):
     m.commit()
 
 
-def sort_entries(e1, e2):
-    return KDKStorage.compare_version(e1.split(' x ')[0], e2.split(' x ')[0])
+
+class Generator:
+    OUTPUT_DIR: str = ''
+
+    def __init__(self, element):
+        self.element          = element
+        self.binexport        = f"{self.element.name}_{self.element.version}.BinExport"
+        self.idb              = f"{self.element.binary}.i64"
+        self.output_dir       = os.path.join(Generator.OUTPUT_DIR, self.element.version)
+        self.output_binexport = os.path.join(self.output_dir, f"{os.path.basename(self.binexport)}")
+        self.output_idb       = os.path.join(self.output_dir, f"{os.path.basename(self.element.binary)}.i64")
+
+    @classmethod
+    def configure(cls, output_dir):
+        cls.OUTPUT_DIR = output_dir
+
+    @staticmethod
+    def generate_binexport(m):
+        print(f"[i] Generating binexport for {m.element.name}_{m.element.version}")
+        IDARunner.set_idapro_path("/Applications/IDAPro_9.3.app/Contents/MacOS")
+        IDARunner.execute(
+            type    = IDABinaryType.KEXT_FAT if m.element.is_macho_fat() else IDABinaryType.KEXT,
+            binary  = m.element.binary,
+            script  = PLG_PATH,
+            args    = [m.binexport]
+        )
+        m.create_output_dir()
+        m.commit()
+
+    def handle(self, pool):
+        self.cleanup()
+        if self.need_to_generate_idb() and self.need_to_generate_binexport():
+            pool.apply_async(Generator.generate_binexport, args=(self,))
+        else:
+            print(f"[!] Exists({os.path.basename(self.output_idb)}) is {self.need_to_generate_idb() == False}")
+            print(f"[!] Exists({os.path.basename(self.output_binexport)}) is {self.need_to_generate_binexport() == False}")
+
+    def need_to_generate_idb(self):
+        return os.path.exists(self.output_idb) == False
+
+    def need_to_generate_binexport(self):
+        return os.path.exists(self.output_binexport) == False
+
+    def cleanup(self):
+        if os.path.exists(self.idb):
+            os.remove(self.idb)
+
+    def create_output_dir(self):
+        if os.path.exists(self.output_dir) == False:
+            os.mkdir(self.output_dir)
+
+    def commit(self):
+        os.rename(self.idb, self.output_idb)
+        os.rename(self.binexport, self.output_binexport)
 
 
 def main():
+    Generator.configure(out_path)
+
     args = arguments()
     storage = KDKStorage(Path(KDK_PATH))
 
     if args.list == True:
-        for kdk in storage.versions:
-            msg = f"{kdk.version}"
-            if kdk.is_beta:
-                msg = f"{msg} (beta)"
+        for msg in storage.get_versions_list_to_print(args.skip_betas):
             print(msg)
         return
 
+    version_to_compare = []
     if args.versions != None:
         if storage.check_existance(args.versions) == False:
             for version in args.versions:
@@ -315,10 +218,12 @@ def main():
         kdk = storage.hashmap_versions[version]
 
         for driver_name in args.drivers:
-            kdk.handle_driver(pool, driver_name)
+            gen = Generator(kdk.driver(driver_name))
+            gen.handle(pool)
 
         for kernel_name in args.kernels:
-            kdk.handle_kernel(pool, kernel_name)
+            gen = Generator(kdk.kernel(kernel_name))
+            gen.handle(pool)
 
     pool.close()
     pool.join()
