@@ -630,10 +630,7 @@ def main():
     storage = KDKStorage(Path(KDK_PATH))
 
     if args.list == True:
-        for kdk in storage.versions:
-            msg = f"{kdk.version}"
-            if kdk.is_beta:
-                msg = f"{msg} (beta)"
+        for msg in storage.get_versions_list_to_print(False):
             print(msg)
         return
 
