@@ -33,6 +33,10 @@ def arguments():
         help = 'Choose version')
     parser.add_argument('-s', '--struct', required=False,
         help = 'Choose struct name')
+    parser.add_argument('-d', '--dump', required=False, action="store_true", default=False,
+        help = 'Dump all structures to files')
+    parser.add_argument('-o', '--output', required=False, type=Path,
+        help = 'Output file for \'-s\' option and directory for \'-d\'')
     # parser.add_argument('-r', '--recursive', action="store_true", default=False,
     #     help = 'Print subtypes')
 
@@ -183,7 +187,7 @@ class CommandOutput(object):
         self._line = 0
 
         self.color = None
-        self.isatty = os.isatty(sys.__stdout__.fileno())
+        self.isatty = os.isatty(self.fhandle.fileno())
         self.VT = VT if self._doColor() else NOVT()
 
     def _doColor(self):
@@ -344,7 +348,6 @@ class StructureRepresentation:
         pass
 
 
-
 class LLDBKernel:
     def __init__(self, kernel, version):
         self.kernel = kernel
@@ -408,11 +411,12 @@ class LLDBKernel:
         else:
             outstr += O.format(" ({VT.DarkMagenta}{0} {1}{VT.Default})", ctype, symbol.GetName())
         if memberName:
-            outstr += O.format(" {0} {{", memberName)
+            outstr += O.format(" {0} {{\n", memberName)
         else:
-            outstr += ") {"
+            outstr += ") {\n"
 
-        print(outstr)
+        # print(outstr)
+        O.write(outstr)
 
         with O.indent():
             _previous_size = 0
@@ -451,6 +455,9 @@ class LLDBKernel:
                 m_name = member.GetName()
                 m_size = m_type.GetByteSize()
 
+                if m_name is None:
+                    m_name = '???'
+
                 if member.IsBitfield():
                     m_is_bitfield = True
                     m_size_bits = member.GetBitfieldSizeInBits()
@@ -462,10 +469,10 @@ class LLDBKernel:
                     m_previous_offset = begin_offset + (_packed_bit_offset // 8)
                     m_hole_bits = m_offset_bits - _packed_bit_offset
                     if _packed_bit_offset % 8 == 0:
-                        print(O.format("{:s}{:s} ({VT.DarkRed}*** padding ***{VT.Default})", O._indent,
+                        O.write(O.format("{:s}{:s} ({VT.DarkRed}*** padding ***{VT.Default})\n", O._indent,
                                format_offset(m_previous_offset, (m_hole_bits // 8))))
                     else:
-                        print(O.format("{:s}{:s} ({VT.Brown}*** padding : {:s} ***{VT.Default})", O._indent,
+                        O.write(O.format("{:s}{:s} ({VT.Brown}*** padding : {:s} ***{VT.Default})\n", O._indent,
                                 format_offset(m_previous_offset, _previous_size),
                                 format_num(m_hole_bits)))
 
@@ -487,14 +494,15 @@ class LLDBKernel:
                         outstr += O.format("{VT.DarkRed}{{{:s}}}{VT.Default}",
                                 format_num(union_size - (m_size_bits // 8)))
                     if m_is_bitfield:
-                        outstr += O.format(" ({VT.DarkGreen}{:s} : {:s}{VT.Default}) {:s}",
+                        outstr += O.format(" ({VT.DarkGreen}{:s} : {:s}{VT.Default}) {:s}\n",
                                 m_type.GetName(),
                                 format_num(m_size_bits),
                                 m_name)
                     else:
-                        outstr += O.format(" ({VT.DarkGreen}{:s}{VT.Default}) {:s}",
+                        outstr += O.format(" ({VT.DarkGreen}{:s}{VT.Default}) {:s}\n",
                                 m_type.GetName(), m_name)
-                    print(outstr)
+                    # print(outstr)
+                    O.write(outstr)
 
             referenceSize = sym_size
             if outerSize:
@@ -504,14 +512,15 @@ class LLDBKernel:
                 m_previous_offset = begin_offset + (_packed_bit_offset // 8)
                 m_hole_bits = referenceSize * 8 - _packed_bit_offset
                 if _packed_bit_offset % 8 == 0:
-                    print(O.format("{:s}{:s} ({VT.DarkRed}*** padding ***{VT.Default})", O._indent,
+                    O.write(O.format("{:s}{:s} ({VT.DarkRed}*** padding ***{VT.Default})\n", O._indent,
                             format_offset(m_previous_offset, m_hole_bits // 8)))
                 else:
-                    print(O.format("{:s}{:s} ({VT.Brown}padding : {:s}{VT.Default})\n", O._indent,
+                    O.write(O.format("{:s}{:s} ({VT.Brown}padding : {:s}{VT.Default})\n", O._indent,
                             format_offset(m_previous_offset, _previous_size),
                             format_num(m_hole_bits)))
 
-        print(f"{O._indent}}}")
+        # print(f"{O._indent}}}")
+        O.write(f'{O._indent}}}\n')
 
     def dump_struct_layout(self, ty_name, O):
         type_list = self.target.FindTypes(ty_name)
@@ -530,16 +539,12 @@ class LLDBKernel:
         ctx = (O, True)
         self._showStructPacking(ctx, sym, 0)
     
-    def list_types(self):
-        WANTED = {lldb.eTypeClassStruct, lldb.eTypeClassUnion, lldb.eTypeClassClass, lldb.eTypeClassEnumeration}
-
+    def list_types(self, wanted):
         seen = set()
         types = []
         for i in range(self.target.GetNumModules()):
             module = self.target.GetModuleAtIndex(i)
-            type_list = module.GetTypes(
-                lldb.eTypeClassStruct | lldb.eTypeClassUnion | lldb.eTypeClassClass | lldb.eTypeClassEnumeration
-            )
+            type_list = module.GetTypes(wanted)
             for j in range(type_list.GetSize()):
                 t = type_list.GetTypeAtIndex(j)
                 name = t.GetName()
@@ -553,10 +558,6 @@ class LLDBKernel:
                     lldb.eTypeClassClass:  "class",
                     lldb.eTypeClassEnumeration : "enum",
                 }.get(tc, "?")
-                # decl = t.GetDeclaration()
-                # fs = decl.GetFileSpec()
-                # path = (fs.GetDirectory() or "") + "/" + (fs.GetFilename() or "")
-                # types.append((kind, name, t.GetByteSize(), path.lstrip("/")))
                 types.append((kind, name, t.GetByteSize()))
         return types
 
@@ -645,11 +646,25 @@ def main():
         matches = lldb_kernel.find_structs_containing_type(args.struct)
         print_matches(matches, args.struct)
     elif args.struct is not None:
-        lldb_kernel.dump_struct_layout(args.struct, CommandOutput(''))
+        if args.output is not None and (args.output.is_file() or args.output.exists() == False):
+            lldb_kernel.dump_struct_layout(args.struct, CommandOutput('', fhandle=args.output.open('w')))
+        else:
+            lldb_kernel.dump_struct_layout(args.struct, CommandOutput('', fhandle=sys.__stdout__))
         # struct_layout = lldb_kernel.get_struct_layout(args.struct, CommandOutput(''))
         # print_struct(struct_layout)
+    elif args.dump is True:
+        if args.output is None or args.output.is_file():
+            print('Set output directory for dumping')
+            return
+        if args.output.exists() == False:
+            os.mkdir(args.output)
+        types = lldb_kernel.list_types(lldb.eTypeClassStruct)
+        for kind, name, size in types:
+            if kind != 'struct' or '::' in name or size == 0:
+                continue
+            lldb_kernel.dump_struct_layout(name, CommandOutput('', fhandle=(args.output / name).open('w')))
     else:
-        types = lldb_kernel.list_types()
+        types = lldb_kernel.list_types(lldb.eTypeClassStruct | lldb.eTypeClassUnion | lldb.eTypeClassClass | lldb.eTypeClassEnumeration)
         print_types(types)
 
 
