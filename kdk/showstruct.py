@@ -658,9 +658,9 @@ def main():
             return
         if args.output.exists() == False:
             os.mkdir(args.output)
-        types = lldb_kernel.list_types(lldb.eTypeClassStruct)
+        types = lldb_kernel.list_types(lldb.eTypeClassStruct | lldb.eTypeClassUnion | lldb.eTypeClassClass | lldb.eTypeClassEnumeration)
         for kind, name, size in types:
-            if kind != 'struct' or '::' in name or size == 0:
+            if kind not in ('struct', 'class') or '::' in name or size == 0:
                 continue
             lldb_kernel.dump_struct_layout(name, CommandOutput('', fhandle=(args.output / name).open('w')))
     else:
