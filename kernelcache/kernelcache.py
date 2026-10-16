@@ -935,6 +935,8 @@ def get_platform():
         return platform
 
     seg_header = ida_segment.get_segm_by_name('com.apple.kernel:HEADER')
+    if seg_header is None:
+        seg_header = ida_segment.get_segm_by_name('com.apple.kernel:__TEXT.HEADER')
     header = seg_header.start_ea
     magic = ida_bytes.get_dword(header)
     if magic != MH_MAGIC_64:

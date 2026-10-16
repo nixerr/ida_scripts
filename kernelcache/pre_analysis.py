@@ -9,11 +9,11 @@ import idc
 
 def make_kernel_const_segments_rw():
     for segment in idautils.Segments():
-        if 'com.apple.kernel:__const' in idc.get_segm_name(segment):
+        if 'com.apple.kernel:__const' in idc.get_segm_name(segment) or 'com.apple.kernel:__DATA_CONST.__const' in idc.get_segm_name(segment):
             seg = ida_segment.getseg(segment)
             seg.perm = ida_segment.SEGPERM_READ | ida_segment.SEGPERM_WRITE
             seg.update()
-            print(f'[i] make \'com.apple.kernel:__const\' (0x{seg.start_ea:x}) writtable')
+            print(f'[i] make \'{idc.get_segm_name(segment)}\' (0x{seg.start_ea:x}) writtable')
 
 def find_panic_trap_to_debugger():
     base_ea     = idaapi.get_imagebase()
