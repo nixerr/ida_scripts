@@ -59,7 +59,10 @@ def main(args):
         t = threading.Thread(target=follow, args=(args.log, stop))
         t.start()
 
-    IDARunner.set_idapro_path("/Applications/IDAPro_9.3.app/Contents/MacOS")
+    os.environ['IDA_KCACHE_ALL'] = '1'
+    os.environ['IDA_KCU_NO_HARVEST'] = '1'
+
+    IDARunner.set_idapro_path("/Applications/IDA Professional 9.5.app/Contents/MacOS")
     IDARunner.execute(
         type    = IDABinaryType.KERNELCACHE,
         binary  = args.kernelcache,
